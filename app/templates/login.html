@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="h4 mb-3">Ingresar</h1>
+        <form method="post" action="/login">
+          <input type="hidden" name="next" value="{{ next or '/' }}" />
+
+          <div class="mb-3">
+            <label class="form-label" for="email">Email</label>
+            <input class="form-control" id="email" name="email" type="email" autocomplete="username" required />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="password">Contraseña</label>
+            <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required />
+          </div>
+
+          <button class="btn btn-primary w-100" type="submit">Entrar</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="text-muted small mt-3">
+      Acceso restringido. Si no tenés usuario, pedíselo a un administrador.
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Reporte {{ year }}</h1>
+    <div class="text-muted">Marcá proyectos para incluirlos en los totales.</div>
+  </div>
+  <div>
+    <form class="d-flex gap-2" method="get" action="/report">
+      <input class="form-control" name="year" type="number" value="{{ year }}" style="max-width: 140px" />
+      <button class="btn btn-primary" type="submit">Ver</button>
+    </form>
+  </div>
+</div>
+
+{% for r in rows %}
+  <div class="card mb-3" id="client-{{ r.client.id }}">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="h5 m-0">
+            <a href="/clients/{{ r.client.id }}?year={{ year }}">{{ r.client.name }}</a>
+            {% if not r.client.active %}<span class="badge text-bg-secondary ms-1">Inactivo</span>{% endif %}
+          </div>
+          <div class="text-muted small">Proyectos incluidos: {{ r.projects_considered_count }}/{{ r.projects_count }}</div>
+        </div>
+        <div class="small">
+          <div><strong>Soporte:</strong> {{ r.currency }} {{ r.support_used|money }} / {{ r.support_budget|money }} (rest: <span class="{% if r.support_remaining < 0 %}text-danger fw-semibold{% endif %}">{{ r.support_remaining|money }}</span>)</div>
+          <div><strong>Mejora:</strong> {{ r.currency }} {{ r.improvement_used|money }} / {{ r.improvement_budget|money }} (rest: <span class="{% if r.improvement_remaining < 0 %}text-danger fw-semibold{% endif %}">{{ r.improvement_remaining|money }}</span>)</div>
+          <div><strong>Extra:</strong> {{ r.currency }} {{ r.extra_used|money }}</div>
+        </div>
+      </div>
+
+      <div class="table-responsive mt-3">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="width: 56px">Incluir</th>
+              <th>Proyecto</th>
+              <th class="text-end">Soporte</th>
+              <th class="text-end">Mejora</th>
+              <th class="text-end">Extra</th>
+              <th class="text-end">Total</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in r.projects %}
+              <tr {% if p.approved is sameas(false) and p.included is sameas(false) %}class="table-secondary"{% endif %}>
+                <td>
+                  {% if p.approved is not sameas(false) %}
+                    <span class="badge text-bg-success">Aprobado</span>
+                  {% else %}
+                    <form method="post" action="/projects/{{ p.id }}/include" class="js-auto-submit">
+                      {% include "_csrf.html" %}
+                      <input type="hidden" name="next" value="/report?year={{ year }}#client-{{ r.client.id }}" />
+                      <input type="hidden" name="included" value="{% if p.included is sameas(false) %}1{% else %}0{% endif %}" />
+                      <input class="form-check-input" type="checkbox" {% if p.included is not sameas(false) %}checked{% endif %} />
+                    </form>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="fw-semibold">{{ p.name }}</div>
+                  {% if p.description %}<div class="text-muted small">{{ p.description }}</div>{% endif %}
+                </td>
+                <td class="text-end">{{ r.currency }} {{ p.estimated_support_cost|money }}</td>
+                <td class="text-end">{{ r.currency }} {{ p.estimated_improvement_cost|money }}</td>
+                <td class="text-end">{{ r.currency }} {{ p.estimated_extra_cost|money }}</td>
+                <td class="text-end">{{ r.currency }} {{ p.total_estimated_cost()|money }}</td>
+                <td class="text-end">
+                  <a class="btn btn-outline-secondary btn-sm" href="/projects/{{ p.id }}">Editar</a>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7" class="text-muted">Sin proyectos en este año.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <div class="text-muted">Sin clientes.</div>
+{% endfor %}
+
+<script>
+  document.querySelectorAll('form.js-auto-submit input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', () => cb.form.submit());
+  });
+</script>
+{% endblock %}

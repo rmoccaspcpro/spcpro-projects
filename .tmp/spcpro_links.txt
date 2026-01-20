@@ -1,0 +1,3 @@
+<link rel="icon" href="https://spcpro.com/wp-content/uploads/2023/07/logo_spcpro_mundoleyenda_icon-150x150.png" sizes="32x32" />
+<link rel="icon" href="https://spcpro.com/wp-content/uploads/2023/07/logo_spcpro_mundoleyenda_icon.png" sizes="192x192" />
+<link rel="apple-touch-icon" href="https://spcpro.com/wp-content/uploads/2023/07/logo_spcpro_mundoleyenda_icon.png" />

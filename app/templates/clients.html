@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h3 m-0">Clientes</h1>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Nuevo cliente</h2>
+        <form method="post" action="/clients">
+          {% include "_csrf.html" %}
+          <div class="mb-2">
+            <label class="form-label">Nombre</label>
+            <input class="form-control" name="name" required />
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Notas</label>
+            <textarea class="form-control" name="notes" rows="3"></textarea>
+          </div>
+          <button class="btn btn-primary" type="submit">Crear</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Listado</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th class="text-end">Activo</th>
+                <th class="text-end">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in clients %}
+                <tr>
+                  <td>
+                    <a href="/clients/{{ c.id }}">{{ c.name }}</a>
+                    {% if c.notes %}<div class="text-muted small">{{ c.notes }}</div>{% endif %}
+                  </td>
+                  <td class="text-end">{{ "Sí" if c.active else "No" }}</td>
+                  <td class="text-end">
+                    <form method="post" action="/clients/{{ c.id }}/toggle" class="d-inline">
+                      {% include "_csrf.html" %}
+                      <button class="btn btn-outline-secondary btn-sm" type="submit">Activar/Desactivar</button>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="3" class="text-muted">Sin clientes todavía.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spcpro-projects-deployment
+  namespace: spcpro
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spcpro-projects
+  template:
+    metadata:
+      labels:
+        app: spcpro-projects
+    spec:
+      containers:
+      - name: spcpro-projects
+        image: k8sregistry.moccraft.com/spcpro_projects:latest
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: spcpro-projects-storage
+          mountPath: /app/data
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        env:
+        - name: DATABASE_PATH
+          value: "/app/data/app.db"
+        envFrom:
+        - secretRef:
+            name: spcpro-projects-secrets
+      volumes:
+      - name: spcpro-projects-storage
+        persistentVolumeClaim:
+          claimName: spcpro-projects-pvc
+

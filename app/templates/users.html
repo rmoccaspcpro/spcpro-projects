@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Usuarios</h1>
+    <div class="text-muted">Administración de accesos.</div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h6">Listado</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Rol</th>
+                <th>Activo</th>
+                <th>Creado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in users %}
+                <tr>
+                  <td class="fw-semibold">{{ u.email }}</td>
+                  <td>
+                    {% if u.is_admin %}
+                      <span class="badge text-bg-primary">Admin</span>
+                    {% else %}
+                      <span class="badge text-bg-secondary">Usuario</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if u.active %}
+                      <span class="badge text-bg-success">Sí</span>
+                    {% else %}
+                      <span class="badge text-bg-danger">No</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-muted small">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h6">Alta de usuario</h2>
+        <form method="post" action="/users">
+          {% include "_csrf.html" %}
+          <div class="mb-3">
+            <label class="form-label" for="email">Email</label>
+            <input class="form-control" id="email" name="email" type="email" autocomplete="username" required />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="password">Contraseña</label>
+            <input class="form-control" id="password" name="password" type="password" autocomplete="new-password" required />
+            <div class="form-text">Mínimo 8 caracteres.</div>
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" id="is_admin" name="is_admin" type="checkbox" value="1" />
+            <label class="form-check-label" for="is_admin">Admin</label>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Crear</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="text-muted small mt-2">
+      Solo administradores pueden crear usuarios.
+    </div>
+  </div>
+</div>
+{% endblock %}

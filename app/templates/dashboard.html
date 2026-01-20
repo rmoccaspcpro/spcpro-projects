@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Dashboard {{ year }}</h1>
+    <div class="text-muted">Vista rápida de clientes, proyectos y presupuesto.</div>
+  </div>
+  <div>
+    <form class="d-flex gap-2" method="get" action="/">
+      <input class="form-control" name="year" type="number" value="{{ year }}" style="max-width: 140px" />
+      <button class="btn btn-primary" type="submit">Ver</button>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-muted small">Clientes activos</div>
+        <div class="display-6">{{ active_clients }}</div>
+        <div class="text-muted small">Total: {{ clients_total }} · Inactivos: {{ inactive_clients }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-muted small">Proyectos (año)</div>
+        <div class="display-6">{{ projects_total }}</div>
+        <div class="text-muted small">Aprobados: {{ projects_approved }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-muted small">Borradores incluidos</div>
+        <div class="display-6">{{ projects_draft_included }}</div>
+        <div class="text-muted small">Borradores fuera: {{ projects_draft_excluded }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-muted small">Alertas</div>
+        <div class="display-6">{{ overspent_clients|length }}</div>
+        <div class="text-muted small">Clientes con sobrepresupuesto (top)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Proyectos (estado)</h2>
+        <canvas id="chartProjects"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Uso de presupuesto (por cliente, %)</h2>
+        <div class="text-muted small mb-2">Se calcula sobre proyectos incluidos (aprobados + borradores incluidos).</div>
+        <canvas id="chartUsage"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Proyectos creados por mes</h2>
+        <canvas id="chartMonthly"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Alertas (top)</h2>
+        {% if overspent_clients %}
+          <ul class="list-unstyled m-0 small">
+            {% for a in overspent_clients %}
+              <li class="mb-2">
+                <div class="fw-semibold"><a href="/clients/{{ a.client.id }}?year={{ year }}">{{ a.client.name }}</a></div>
+                <div class="text-muted">Soporte rest.: {{ a.currency }} {{ a.support_remaining|money }} · Mejora rest.: {{ a.currency }} {{ a.improvement_remaining|money }}</div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="text-muted small">Sin sobrepresupuesto detectado.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="chart-data" type="application/json">{{ chart_data_json | safe }}</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  const data = JSON.parse(document.getElementById('chart-data').textContent);
+
+  new Chart(document.getElementById('chartProjects'), {
+    type: 'doughnut',
+    data: {
+      labels: data.projectsState.labels,
+      datasets: [{
+        data: data.projectsState.data,
+        backgroundColor: ['#198754', '#0d6efd', '#6c757d']
+      }]
+    },
+    options: {
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  new Chart(document.getElementById('chartMonthly'), {
+    type: 'line',
+    data: {
+      labels: data.monthly.labels,
+      datasets: [{
+        label: 'Proyectos',
+        data: data.monthly.data,
+        borderColor: '#0d6efd',
+        backgroundColor: 'rgba(13,110,253,0.15)',
+        fill: true,
+        tension: 0.25
+      }]
+    },
+    options: {
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  new Chart(document.getElementById('chartUsage'), {
+    type: 'bar',
+    data: {
+      labels: data.usagePct.labels,
+      datasets: [
+        {
+          label: 'Soporte % usado',
+          data: data.usagePct.support,
+          backgroundColor: 'rgba(25,135,84,0.35)',
+          borderColor: '#198754',
+          borderWidth: 1
+        },
+        {
+          label: 'Mejora % usado',
+          data: data.usagePct.improvement,
+          backgroundColor: 'rgba(13,110,253,0.35)',
+          borderColor: '#0d6efd',
+          borderWidth: 1
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: {
+          beginAtZero: true,
+          suggestedMax: 120,
+          ticks: {
+            callback: (v) => v + '%'
+          }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}

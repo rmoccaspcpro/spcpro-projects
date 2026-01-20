@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">{{ client.name }}</h1>
+    {% if client.notes %}<div class="text-muted">{{ client.notes }}</div>{% endif %}
+  </div>
+  <div>
+    <a class="btn btn-outline-secondary" href="/clients">Volver</a>
+  </div>
+</div>
+
+<form class="row g-2 mb-3" method="get" action="/clients/{{ client.id }}">
+  <div class="col-auto">
+    <label class="form-label">Año</label>
+    <input class="form-control" name="year" type="number" value="{{ year }}" />
+  </div>
+  <div class="col-auto align-self-end">
+    <button class="btn btn-primary" type="submit">Ver</button>
+  </div>
+</form>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Presupuesto {{ year }}</h2>
+        <form method="post" action="/clients/{{ client.id }}/budgets/{{ year }}">
+          {% include "_csrf.html" %}
+          <div class="row g-2">
+            <div class="col-4">
+              <label class="form-label">Moneda</label>
+              <input class="form-control" name="currency" value="{{ budget.currency if budget else 'ARS' }}" />
+            </div>
+            <div class="col-8"></div>
+            <div class="col-6">
+              <label class="form-label">Soporte (anual)</label>
+              <input class="form-control" name="support_amount" type="text" inputmode="decimal" value="{{ (budget.support_amount if budget else 0)|money }}" />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Mejora continua (anual)</label>
+              <input class="form-control" name="improvement_amount" type="text" inputmode="decimal" value="{{ (budget.improvement_amount if budget else 0)|money }}" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <button class="btn btn-primary" type="submit">Guardar presupuesto</button>
+          </div>
+        </form>
+
+        <hr />
+
+        <h3 class="h6">Resumen</h3>
+        <div class="small">
+          <div class="fw-semibold">Aprobados (cuentan en presupuesto)</div>
+          <div><strong>Soporte usado:</strong> {{ currency }} {{ used_support|money }}</div>
+          <div><strong>Soporte restante:</strong> {{ currency }} {{ remaining_support|money }}</div>
+          <div class="mt-2"><strong>Mejora usada:</strong> {{ currency }} {{ used_improvement|money }}</div>
+          <div><strong>Mejora restante:</strong> {{ currency }} {{ remaining_improvement|money }}</div>
+          <div class="mt-2"><strong>Extra:</strong> {{ currency }} {{ used_extra|money }}</div>
+
+          <div class="mt-3 fw-semibold">Total estimado (incluye borradores)</div>
+          <div><strong>Soporte usado:</strong> {{ currency }} {{ used_support_all|money }}</div>
+          <div><strong>Soporte restante:</strong> {{ currency }} {{ remaining_support_all|money }}</div>
+          <div class="mt-2"><strong>Mejora usada:</strong> {{ currency }} {{ used_improvement_all|money }}</div>
+          <div><strong>Mejora restante:</strong> {{ currency }} {{ remaining_improvement_all|money }}</div>
+          <div class="mt-2"><strong>Extra:</strong> {{ currency }} {{ used_extra_all|money }}</div>
+
+          <div class="mt-2 text-muted">Los borradores no se contabilizan hasta aprobarlos.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h5 m-0">Proyectos {{ year }}</h2>
+        </div>
+
+        <form class="mt-3" method="post" action="/clients/{{ client.id }}/projects">
+          {% include "_csrf.html" %}
+          <input type="hidden" name="year" value="{{ year }}" />
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Nombre</label>
+              <input class="form-control" name="name" required />
+            </div>
+            <div class="col-2 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="included" value="1" id="included_new" />
+                <label class="form-check-label" for="included_new">Incluir</label>
+              </div>
+            </div>
+            <div class="col-2">
+              <label class="form-label">Soporte</label>
+              <input class="form-control" name="estimated_support_cost" type="text" inputmode="decimal" value="0,00" />
+            </div>
+            <div class="col-2">
+              <label class="form-label">Mejora</label>
+              <input class="form-control" name="estimated_improvement_cost" type="text" inputmode="decimal" value="0,00" />
+            </div>
+            <div class="col-2">
+              <label class="form-label">Extra</label>
+              <input class="form-control" name="estimated_extra_cost" type="text" inputmode="decimal" value="0,00" />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Descripción</label>
+              <input class="form-control" name="description" />
+            </div>
+          </div>
+          <div class="mt-2">
+            <button class="btn btn-success" type="submit">Agregar proyecto</button>
+          </div>
+        </form>
+
+        <hr />
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Proyecto</th>
+                <th class="text-end">Soporte</th>
+                <th class="text-end">Mejora</th>
+                <th class="text-end">Extra</th>
+                <th class="text-end">Total</th>
+                <th class="text-end">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in projects %}
+                <tr {% if p.approved is sameas(false) and p.included is sameas(false) %}class="table-secondary"{% endif %}>
+                  <td>
+                    <div class="fw-semibold">{{ p.name }}</div>
+                    <div class="small text-muted">
+                      {% if p.approved is not sameas(false) %}
+                        <span class="badge text-bg-success">Aprobado</span>
+                      {% else %}
+                        <span class="badge text-bg-secondary">Borrador</span>
+                        {% if p.included is not sameas(false) %}
+                          <span class="badge text-bg-primary ms-1">Incluido</span>
+                        {% endif %}
+                      {% endif %}
+                    </div>
+                    {% if p.description %}<div class="text-muted small">{{ p.description }}</div>{% endif %}
+                  </td>
+                  <td class="text-end">{{ currency }} {{ p.estimated_support_cost|money }}</td>
+                  <td class="text-end">{{ currency }} {{ p.estimated_improvement_cost|money }}</td>
+                  <td class="text-end">{{ currency }} {{ p.estimated_extra_cost|money }}</td>
+                  <td class="text-end">{{ currency }} {{ p.total_estimated_cost()|money }}</td>
+                  <td class="text-end">
+                    <a class="btn btn-outline-secondary btn-sm" href="/projects/{{ p.id }}">Editar</a>
+                    {% if p.approved is sameas(false) %}
+                      <form method="post" action="/projects/{{ p.id }}/approve" class="d-inline">
+                        {% include "_csrf.html" %}
+                        <input type="hidden" name="next" value="/clients/{{ client.id }}?year={{ year }}" />
+                        <button class="btn btn-outline-success btn-sm" type="submit">Aprobar</button>
+                      </form>
+                    {% endif %}
+                    <form method="post" action="/projects/{{ p.id }}/delete" class="d-inline">
+                      {% include "_csrf.html" %}
+                      <button class="btn btn-outline-danger btn-sm" type="submit">Borrar</button>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="6" class="text-muted">Sin proyectos en este año.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
