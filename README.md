@@ -8,10 +8,12 @@ MVP para administrar proyectos por cliente y comparar consumo anual vs presupues
 ## Ejecutar
 ```bash
 pip install -r requirements.txt
-SPCPRO_DEFAULT_ADMIN_EMAIL=rodrigo.mocca@spcpro.com \
-SPCPRO_DEFAULT_ADMIN_PASSWORD='SpCpRo2026!' \
+SPCPRO_DEFAULT_ADMIN_EMAIL=tu-email@ejemplo.com \
+SPCPRO_DEFAULT_ADMIN_PASSWORD='TuContraseñaSegura!' \
 uvicorn app.main:app --reload
 ```
+
+**Nota:** Reemplaza `tu-email@ejemplo.com` y `TuContraseñaSegura!` con credenciales reales antes de ejecutar.
 
 Abrir: http://127.0.0.1:8000
 
