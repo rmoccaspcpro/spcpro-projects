@@ -145,8 +145,9 @@ node_modules/
 # Docker
 *.tar
 
-# Kubernetes
-k8s/*.yaml
+# Kubernetes - ignore local secret files with real credentials
+k8s/secret.local.yaml
+k8s/*.local.yaml
 
 # Ignore temporary files
 *.tmp
