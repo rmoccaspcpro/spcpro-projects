@@ -90,3 +90,52 @@ class AuthSession(SQLModel, table=True):
     csrf_token: Optional[str] = Field(default=None, index=True)
     expires_at: datetime = Field(index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DevelopmentEstimation(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: int = Field(index=True, foreign_key="client.id")
+
+    title: str = Field(default="")
+    notes: str = Field(default="")
+
+    # Stored as JSON string: [{"name": "...", "points": "..."}, ...]
+    items_json: str = Field(default="[]")
+
+    # Stored as JSON string: [1,2,3]
+    team_member_ids_json: str = Field(default="[]")
+
+    # Stored as JSON string: {"1": "50", "2": "50"}
+    team_member_participation_json: str = Field(default="{}")
+
+    points_sum: Decimal = Field(default=Decimal("0"))
+
+    testing_percent: Decimal = Field(default=Decimal("20"))
+    testing_points: Decimal = Field(default=Decimal("0"))
+
+    buffer_percent: Decimal = Field(default=Decimal("0"))
+    buffer_points: Decimal = Field(default=Decimal("0"))
+
+    total_points: Decimal = Field(default=Decimal("0"))
+
+    velocity: Decimal = Field(default=Decimal("0"))
+    sprints_raw: Decimal = Field(default=Decimal("0"))
+    sprints_needed: int = Field(default=0)
+
+    monthly_salary_total: Decimal = Field(default=Decimal("0"))
+    cost_per_sprint: Decimal = Field(default=Decimal("0"))
+
+    total_cost: Decimal = Field(default=Decimal("0"))
+    margin_percent: Decimal = Field(default=Decimal("35"))
+    margin_amount: Decimal = Field(default=Decimal("0"))
+    final_cost: Decimal = Field(default=Decimal("0"))
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TeamMember(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    monthly_salary: Decimal = Field(default=Decimal("0"))
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

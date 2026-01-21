@@ -17,7 +17,15 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from .db import engine, get_session, init_db
-from .models import AnnualBudget, AuthSession, Client, Project, User
+from .models import (
+    AnnualBudget,
+    AuthSession,
+    Client,
+    DevelopmentEstimation,
+    Project,
+    TeamMember,
+    User,
+)
 
 app = FastAPI(title="SPC Pro")
 
@@ -43,6 +51,10 @@ SESSION_TTL = timedelta(days=7)
 DEFAULT_ADMIN_EMAIL = os.getenv("SPCPRO_DEFAULT_ADMIN_EMAIL")
 DEFAULT_ADMIN_PASSWORD = os.getenv("SPCPRO_DEFAULT_ADMIN_PASSWORD")
 
+DEFAULT_TESTING_PERCENT = os.getenv("SPCPRO_DEFAULT_TESTING_PERCENT", "20")
+DEFAULT_BUFFER_PERCENT = os.getenv("SPCPRO_DEFAULT_BUFFER_PERCENT", "0")
+DEFAULT_MARGIN_PERCENT = os.getenv("SPCPRO_DEFAULT_MARGIN_PERCENT", "35")
+
 
 def _fmt_money(value: Optional[Decimal]) -> str:
     """Formato de display: miles con punto y decimales con coma (ej: 1.234,56)."""
@@ -59,6 +71,32 @@ def _fmt_money(value: Optional[Decimal]) -> str:
     return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _fmt_dec2(value: object) -> str:
+    """Formato genérico: 2 decimales y coma como separador decimal (ej: 12,34)."""
+
+    dec: Decimal
+    if value is None:
+        dec = Decimal("0")
+    elif isinstance(value, Decimal):
+        dec = value
+    elif isinstance(value, (int, float)):
+        dec = Decimal(str(value))
+    elif isinstance(value, str):
+        dec = _to_decimal(value, default=Decimal("0"))
+    else:
+        try:
+            dec = Decimal(str(value))
+        except Exception:
+            dec = Decimal("0")
+
+    try:
+        quantized = dec.quantize(Decimal("0.01"))
+    except Exception:
+        quantized = Decimal("0.00")
+
+    return format(quantized, "f").replace(".", ",")
+
+
 def _fmt_money_input(value: Optional[Decimal]) -> str:
     """Formato para inputs numéricos HTML: sin miles y decimal con punto (ej: 1234.56)."""
 
@@ -73,6 +111,7 @@ def _fmt_money_input(value: Optional[Decimal]) -> str:
 
 templates.env.filters["money"] = _fmt_money
 templates.env.filters["money_input"] = _fmt_money_input
+templates.env.filters["dec2"] = _fmt_dec2
 
 
 @app.on_event("startup")
@@ -435,6 +474,99 @@ def users_create(
     )
 
 
+@app.get("/team")
+def team_page(
+    request: Request,
+    message: Optional[str] = None,
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    members = session.exec(select(TeamMember).order_by(TeamMember.name)).all()
+    return templates.TemplateResponse(
+        request,
+        "team.html",
+        {"title": "Equipo", "members": members, "message": message},
+    )
+
+
+@app.post("/team")
+def team_create(
+    request: Request,
+    name: str = Form(...),
+    monthly_salary: str = Form("0"),
+    active: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    member = TeamMember(
+        name=name.strip(),
+        monthly_salary=_non_negative(_to_decimal(monthly_salary)),
+        active=active is not None,
+    )
+    session.add(member)
+    session.commit()
+    return RedirectResponse(
+        url="/team?message=" + quote_plus("Miembro creado."), status_code=303
+    )
+
+
+@app.get("/team/{member_id}")
+def team_edit_page(
+    request: Request,
+    member_id: int,
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    member = session.get(TeamMember, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Miembro no encontrado")
+    return templates.TemplateResponse(
+        request,
+        "team_edit.html",
+        {"title": "Editar miembro", "member": member},
+    )
+
+
+@app.post("/team/{member_id}")
+def team_update(
+    request: Request,
+    member_id: int,
+    name: str = Form(...),
+    monthly_salary: str = Form("0"),
+    active: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    member = session.get(TeamMember, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Miembro no encontrado")
+    member.name = name.strip()
+    member.monthly_salary = _non_negative(_to_decimal(monthly_salary))
+    member.active = active is not None
+    session.add(member)
+    session.commit()
+    return RedirectResponse(
+        url="/team?message=" + quote_plus("Miembro actualizado."), status_code=303
+    )
+
+
+@app.post("/team/{member_id}/delete")
+def team_delete(
+    request: Request,
+    member_id: int,
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    member = session.get(TeamMember, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Miembro no encontrado")
+    session.delete(member)
+    session.commit()
+    return RedirectResponse(
+        url="/team?message=" + quote_plus("Miembro borrado."), status_code=303
+    )
+
+
 def _to_decimal(value: Optional[str], default: Decimal = Decimal("0")) -> Decimal:
     if value is None:
         return default
@@ -472,6 +604,60 @@ def _to_decimal(value: Optional[str], default: Decimal = Decimal("0")) -> Decima
 
 def _non_negative(value: Decimal) -> Decimal:
     return value if value >= 0 else Decimal("0")
+
+
+def _ceil_decimal_to_int(value: Decimal) -> int:
+    if value <= 0:
+        return 0
+    integral = value.to_integral_value(rounding="ROUND_FLOOR")
+    return int(integral if integral == value else (integral + 1))
+
+
+def _calc_development_estimation(
+    *,
+    items_points_sum: Decimal,
+    testing_percent: Decimal,
+    buffer_percent: Decimal,
+    velocity: Decimal,
+    monthly_salary_total: Decimal,
+    margin_percent: Decimal,
+) -> dict:
+    items_points_sum = _non_negative(items_points_sum)
+    testing_percent = _non_negative(testing_percent)
+    buffer_percent = _non_negative(buffer_percent)
+    velocity = _non_negative(velocity)
+    monthly_salary_total = _non_negative(monthly_salary_total)
+    margin_percent = _non_negative(margin_percent)
+
+    testing_points = (items_points_sum * testing_percent) / Decimal("100")
+    subtotal_points = items_points_sum + testing_points
+    buffer_points = (subtotal_points * buffer_percent) / Decimal("100")
+    total_points = subtotal_points + buffer_points
+
+    if velocity > 0:
+        sprints_raw = total_points / velocity
+        sprints_needed = _ceil_decimal_to_int(sprints_raw)
+    else:
+        sprints_raw = Decimal("0")
+        sprints_needed = 0
+
+    cost_per_sprint = monthly_salary_total / Decimal("2")
+    total_cost = cost_per_sprint * Decimal(str(sprints_needed))
+    margin_amount = (total_cost * margin_percent) / Decimal("100")
+    final_cost = total_cost + margin_amount
+
+    return {
+        "points_sum": items_points_sum,
+        "testing_points": testing_points,
+        "buffer_points": buffer_points,
+        "total_points": total_points,
+        "sprints_raw": sprints_raw,
+        "sprints_needed": sprints_needed,
+        "cost_per_sprint": cost_per_sprint,
+        "total_cost": total_cost,
+        "margin_amount": margin_amount,
+        "final_cost": final_cost,
+    }
 
 
 def _project_counts_for_totals(project: Project) -> bool:
@@ -728,6 +914,12 @@ def client_detail(
         .order_by(Project.created_at.desc())
     ).all()
 
+    estimations = session.exec(
+        select(DevelopmentEstimation)
+        .where(DevelopmentEstimation.client_id == client_id)
+        .order_by(DevelopmentEstimation.created_at.desc())
+    ).all()
+
     approved_projects = [p for p in projects if _project_counts_for_totals(p)]
 
     used_support = sum(
@@ -783,6 +975,249 @@ def client_detail(
             "used_extra_all": used_extra_all,
             "remaining_support_all": remaining_support_all,
             "remaining_improvement_all": remaining_improvement_all,
+            "estimations": estimations,
+        },
+    )
+
+
+@app.get("/clients/{client_id}/estimations/new")
+def estimation_new_page(
+    request: Request,
+    client_id: int,
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    team_members = session.exec(
+        select(TeamMember).where(TeamMember.active == True).order_by(TeamMember.name)
+    ).all()
+
+    defaults = {
+        "testing_percent": _to_decimal(DEFAULT_TESTING_PERCENT, default=Decimal("20")),
+        "buffer_percent": _to_decimal(DEFAULT_BUFFER_PERCENT, default=Decimal("0")),
+        "margin_percent": _to_decimal(DEFAULT_MARGIN_PERCENT, default=Decimal("35")),
+    }
+
+    return templates.TemplateResponse(
+        request,
+        "estimation_new.html",
+        {
+            "title": f"Nueva estimación - {client.name}",
+            "client": client,
+            "defaults": defaults,
+            "team_members": team_members,
+        },
+    )
+
+
+@app.post("/clients/{client_id}/estimations")
+def estimation_create(
+    client_id: int,
+    title: str = Form(""),
+    notes: str = Form(""),
+    team_member_id: list[str] = Form([]),
+    team_member_participation: list[str] = Form([]),
+    feature_name: list[str] = Form([]),
+    feature_points: list[str] = Form([]),
+    testing_percent: str = Form(""),
+    buffer_percent: str = Form(""),
+    velocity: str = Form(""),
+    monthly_salary_total: str = Form(""),
+    margin_percent: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    t_pct = _to_decimal(
+        testing_percent,
+        default=_to_decimal(DEFAULT_TESTING_PERCENT, default=Decimal("20")),
+    )
+    b_pct = _to_decimal(
+        buffer_percent,
+        default=_to_decimal(DEFAULT_BUFFER_PERCENT, default=Decimal("0")),
+    )
+    m_pct = _to_decimal(
+        margin_percent,
+        default=_to_decimal(DEFAULT_MARGIN_PERCENT, default=Decimal("35")),
+    )
+    vel = _to_decimal(velocity, default=Decimal("0"))
+    selected_ids: list[int] = []
+    for raw_id in team_member_id:
+        try:
+            selected_ids.append(int(str(raw_id)))
+        except Exception:
+            continue
+    selected_ids = sorted(set(selected_ids))
+
+    # Parse participations sent as repeated fields: "<id>:<pct>".
+    participation_by_id: dict[int, Decimal] = {}
+    for raw in team_member_participation:
+        try:
+            s = str(raw)
+            if ":" not in s:
+                continue
+            id_str, pct_str = s.split(":", 1)
+            member_id = int(id_str.strip())
+            pct = _to_decimal(pct_str.strip(), default=Decimal("100"))
+            if pct < 0:
+                pct = Decimal("0")
+            if pct > 100:
+                pct = Decimal("100")
+            participation_by_id[member_id] = pct
+        except Exception:
+            continue
+
+    salary_total = _to_decimal(monthly_salary_total, default=Decimal("0"))
+    participation_json: dict[str, str] = {}
+    if selected_ids:
+        members = session.exec(
+            select(TeamMember).where(TeamMember.id.in_(selected_ids))
+        ).all()
+        salary_total = Decimal("0")
+        for m in members:
+            pct = participation_by_id.get(m.id or 0, Decimal("100"))
+            participation_json[str(m.id)] = str(pct)
+            salary_total += (m.monthly_salary * pct) / Decimal("100")
+
+    items: list[dict] = []
+    points_sum = Decimal("0")
+
+    # Normalize list lengths (FastAPI can send uneven lists depending on the browser)
+    max_len = max(len(feature_name), len(feature_points), 0)
+    for i in range(max_len):
+        name = (feature_name[i] if i < len(feature_name) else "").strip()
+        pts_str = (feature_points[i] if i < len(feature_points) else "").strip()
+        if not name and not pts_str:
+            continue
+        pts = _non_negative(_to_decimal(pts_str, default=Decimal("0")))
+        items.append({"name": name, "points": str(pts)})
+        points_sum += pts
+
+    calc = _calc_development_estimation(
+        items_points_sum=points_sum,
+        testing_percent=t_pct,
+        buffer_percent=b_pct,
+        velocity=vel,
+        monthly_salary_total=salary_total,
+        margin_percent=m_pct,
+    )
+
+    estimation = DevelopmentEstimation(
+        client_id=client_id,
+        title=title.strip(),
+        notes=notes.strip(),
+        items_json=json.dumps(items, ensure_ascii=False),
+        team_member_ids_json=json.dumps(selected_ids, ensure_ascii=False),
+        team_member_participation_json=json.dumps(
+            participation_json, ensure_ascii=False
+        ),
+        points_sum=calc["points_sum"],
+        testing_percent=t_pct,
+        testing_points=calc["testing_points"],
+        buffer_percent=b_pct,
+        buffer_points=calc["buffer_points"],
+        total_points=calc["total_points"],
+        velocity=vel,
+        sprints_raw=calc["sprints_raw"],
+        sprints_needed=int(calc["sprints_needed"]),
+        monthly_salary_total=salary_total,
+        cost_per_sprint=calc["cost_per_sprint"],
+        total_cost=calc["total_cost"],
+        margin_percent=m_pct,
+        margin_amount=calc["margin_amount"],
+        final_cost=calc["final_cost"],
+    )
+
+    session.add(estimation)
+    session.commit()
+    session.refresh(estimation)
+
+    return RedirectResponse(
+        url=f"/clients/{client_id}/estimations/{estimation.id}", status_code=303
+    )
+
+
+@app.get("/clients/{client_id}/estimations/{estimation_id}")
+def estimation_detail_page(
+    request: Request,
+    client_id: int,
+    estimation_id: int,
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    estimation = session.get(DevelopmentEstimation, estimation_id)
+    if not estimation or estimation.client_id != client_id:
+        raise HTTPException(status_code=404, detail="Estimación no encontrada")
+
+    try:
+        items = json.loads(estimation.items_json or "[]")
+        if not isinstance(items, list):
+            items = []
+    except Exception:
+        items = []
+
+    try:
+        member_ids = json.loads(estimation.team_member_ids_json or "[]")
+        if not isinstance(member_ids, list):
+            member_ids = []
+    except Exception:
+        member_ids = []
+
+    try:
+        participation_raw = json.loads(
+            estimation.team_member_participation_json or "{}"
+        )
+        if not isinstance(participation_raw, dict):
+            participation_raw = {}
+    except Exception:
+        participation_raw = {}
+
+    selected_members: list[TeamMember] = []
+    ids_int: list[int] = []
+    for raw_id in member_ids:
+        try:
+            ids_int.append(int(str(raw_id)))
+        except Exception:
+            continue
+    if ids_int:
+        selected_members = session.exec(
+            select(TeamMember)
+            .where(TeamMember.id.in_(ids_int))
+            .order_by(TeamMember.name)
+        ).all()
+
+    selected_member_rows: list[dict] = []
+    for m in selected_members:
+        pct_raw = participation_raw.get(str(m.id), "100")
+        pct = _to_decimal(str(pct_raw), default=Decimal("100"))
+        if pct < 0:
+            pct = Decimal("0")
+        if pct > 100:
+            pct = Decimal("100")
+        used = (m.monthly_salary * pct) / Decimal("100")
+        try:
+            used = used.quantize(Decimal("0.01"))
+        except Exception:
+            pass
+        selected_member_rows.append({"member": m, "pct": pct, "salary_used": used})
+
+    return templates.TemplateResponse(
+        request,
+        "estimation_detail.html",
+        {
+            "title": f"Estimación - {client.name}",
+            "client": client,
+            "estimation": estimation,
+            "items": items,
+            "selected_members": selected_members,
+            "selected_member_rows": selected_member_rows,
         },
     )
 

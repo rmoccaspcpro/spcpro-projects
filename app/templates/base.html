@@ -28,6 +28,7 @@
               <a class="btn btn-outline-primary btn-sm" href="/report">Reporte</a>
               {% if current_user.is_admin %}
                 <a class="btn btn-outline-secondary btn-sm" href="/users">Usuarios</a>
+                <a class="btn btn-outline-secondary btn-sm" href="/team">Equipo</a>
               {% endif %}
               <div class="d-flex align-items-center px-2 small text-muted">{{ current_user.email }}</div>
               <form method="post" action="/logout" class="m-0">

@@ -96,6 +96,16 @@ def _migrate_sqlite() -> None:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE authsession ADD COLUMN csrf_token TEXT"))
 
+    # Migrate DevelopmentEstimation table (team participation)
+    est_cols = _sqlite_columns("developmentestimation")
+    if est_cols and "team_member_participation_json" not in est_cols:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE developmentestimation ADD COLUMN team_member_participation_json TEXT"
+                )
+            )
+
 
 def get_session() -> Session:
     return Session(engine)

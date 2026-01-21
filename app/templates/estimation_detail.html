@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Estimación</h1>
+    <div class="text-muted">Cliente: <strong>{{ client.name }}</strong></div>
+    {% if estimation.title %}<div class="mt-1"><strong>{{ estimation.title }}</strong></div>{% endif %}
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}">Volver</a>
+    <a class="btn btn-outline-primary" href="/clients/{{ client.id }}/estimations/new">Nueva estimación</a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Funcionalidades</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Funcionalidad</th>
+                <th class="text-end">Puntos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for it in items %}
+                <tr>
+                  <td>{{ it.name if it.name is defined else it["name"] }}</td>
+                  <td class="text-end">{{ (it.points if it.points is defined else it["points"])|dec2 }}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="2" class="text-muted">Sin funcionalidades.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if estimation.notes %}
+          <hr />
+          <div class="small text-muted">Notas</div>
+          <div>{{ estimation.notes }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5">Resumen</h2>
+        <div class="small mb-2">
+          <div class="text-muted">Equipo</div>
+          {% if selected_member_rows is defined and selected_member_rows %}
+            {% for r in selected_member_rows %}
+              <div>
+                {{ r.member.name }}
+                <span class="text-muted">({{ r.member.monthly_salary|money }} · {{ r.pct|dec2 }}% → {{ r.salary_used|money }})</span>
+              </div>
+            {% endfor %}
+          {% else %}
+            {% for m in selected_members %}
+              <div>{{ m.name }} <span class="text-muted">({{ m.monthly_salary|money }})</span></div>
+            {% else %}
+              <div class="text-muted">(sin equipo seleccionado)</div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div class="small">
+          <div><strong>Puntos (funcionalidades):</strong> {{ estimation.points_sum|dec2 }}</div>
+          <div><strong>Testing (%):</strong> {{ estimation.testing_percent|dec2 }}</div>
+          <div><strong>Testing (pts):</strong> {{ estimation.testing_points|dec2 }}</div>
+          <div class="mt-1"><strong>Buffer (%):</strong> {{ estimation.buffer_percent|dec2 }}</div>
+          <div><strong>Buffer (pts):</strong> {{ estimation.buffer_points|dec2 }}</div>
+          <div class="mt-2"><strong>Total puntos:</strong> {{ estimation.total_points|dec2 }}</div>
+          <div class="mt-2"><strong>Velocidad:</strong> {{ estimation.velocity|dec2 }}</div>
+          <div><strong>Sprints (raw):</strong> {{ estimation.sprints_raw|dec2 }}</div>
+          <div><strong>Sprints necesarios (ceil):</strong> {{ estimation.sprints_needed }}</div>
+          <hr />
+          <div><strong>Sueldos mensuales:</strong> {{ estimation.monthly_salary_total|money }}</div>
+          <div><strong>Costo por sprint:</strong> {{ estimation.cost_per_sprint|money }}</div>
+          <div class="mt-2"><strong>Total:</strong> {{ estimation.total_cost|money }}</div>
+          <div><strong>Margen (%):</strong> {{ estimation.margin_percent|dec2 }}</div>
+          <div><strong>Margen (importe):</strong> {{ estimation.margin_amount|money }}</div>
+          <div class="mt-2"><strong>Estimación final:</strong> {{ estimation.final_cost|money }}</div>
+        </div>
+
+        <div class="text-muted small mt-3">Creada: {{ estimation.created_at.strftime('%Y-%m-%d %H:%M') if estimation.created_at else '' }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
