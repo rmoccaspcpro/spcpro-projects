@@ -1536,9 +1536,9 @@ def odoo_review(
     # Apply search filter
     if search:
         search_lower = search.lower()
-        tasks = [t for t in tasks if str(t.task_id) == search or search_lower in str(t.task_id)]
-        tickets = [t for t in tickets if str(t.ticket_id) == search or search_lower in str(t.ticket_id)]
-        projects = [p for p in projects if search_lower in p.name.lower() or str(p.project_id) == search]
+        tasks = [t for t in tasks if search_lower in str(t.task_id).lower()]
+        tickets = [t for t in tickets if search_lower in str(t.ticket_id).lower()]
+        projects = [p for p in projects if search_lower in p.name.lower() or search_lower in str(p.project_id).lower()]
     
     # Find orphans
     orphan_tickets = [t for t in tickets if t.task_id is None]
@@ -1609,9 +1609,9 @@ def odoo_task_edit_post(
     
     task.task_id = odoo_task_id
     task.status = status
-    task.ticket_id = ticket_id if ticket_id else None
-    task.feature_id = feature_id if feature_id else None
-    task.project_id = project_id if project_id else None
+    task.ticket_id = ticket_id or None
+    task.feature_id = feature_id or None
+    task.project_id = project_id or None
     task.updated_at = datetime.utcnow()
     
     session.add(task)
@@ -1657,7 +1657,7 @@ def odoo_ticket_edit_post(
     
     ticket.ticket_id = odoo_ticket_id
     ticket.status = status
-    ticket.task_id = task_id if task_id else None
+    ticket.task_id = task_id or None
     ticket.updated_at = datetime.utcnow()
     
     session.add(ticket)
@@ -1706,7 +1706,7 @@ def odoo_project_edit_post(
     project.name = name
     project.keys = keys
     project.tags = tags
-    project.tag_id = tag_id if tag_id else None
+    project.tag_id = tag_id or None
     
     session.add(project)
     session.commit()
