@@ -139,3 +139,37 @@ class TeamMember(SQLModel, table=True):
     monthly_salary: Decimal = Field(default=Decimal("0"))
     active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# Odoo external database models (for review section)
+class OdooProject(SQLModel, table=True):
+    __tablename__ = "odoo_projects"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(index=True)  # Odoo project ID
+    name: str = Field(default="")
+    keys: str = Field(default="")  # Project keys/codes
+    tags: str = Field(default="")
+    tag_id: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OdooTask(SQLModel, table=True):
+    __tablename__ = "odoo_tasks"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(index=True)  # Odoo task ID
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    status: int = Field(default=0, index=True)  # 0-5
+    ticket_id: Optional[int] = Field(default=None, index=True)
+    feature_id: Optional[int] = Field(default=None)
+    project_id: Optional[int] = Field(default=None, index=True)
+
+
+class OdooTicket(SQLModel, table=True):
+    __tablename__ = "odoo_tickets"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticket_id: int = Field(index=True)  # Odoo ticket ID
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    status: int = Field(default=0, index=True)  # 0-5
+    task_id: Optional[int] = Field(default=None, index=True)

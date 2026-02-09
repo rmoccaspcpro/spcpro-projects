@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Editar Proyecto de Odoo</h1>
+    <div class="text-muted">Project ID: {{ project.project_id }}</div>
+  </div>
+  <div>
+    <a class="btn btn-outline-secondary" href="/odoo/review">Volver</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <form method="post" action="/odoo/projects/{{ project.id }}/edit">
+      {% include "_csrf.html" %}
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label">Project ID (Odoo)</label>
+          <input 
+            class="form-control" 
+            name="odoo_project_id" 
+            type="number" 
+            value="{{ project.project_id }}" 
+            required 
+          />
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Nombre</label>
+          <input 
+            class="form-control" 
+            name="name" 
+            type="text" 
+            value="{{ project.name }}" 
+            required 
+          />
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Keys (Claves)</label>
+          <input 
+            class="form-control" 
+            name="keys" 
+            type="text" 
+            value="{{ project.keys }}" 
+          />
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Tags (Etiquetas)</label>
+          <input 
+            class="form-control" 
+            name="tags" 
+            type="text" 
+            value="{{ project.tags }}" 
+          />
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Tag ID (opcional)</label>
+          <input 
+            class="form-control" 
+            name="tag_id" 
+            type="number" 
+            value="{{ project.tag_id if project.tag_id else '' }}" 
+          />
+        </div>
+
+        <div class="col-12">
+          <div class="text-muted small">
+            Creado: {{ project.created_at.strftime('%Y-%m-%d %H:%M:%S') if project.created_at else '-' }}
+          </div>
+        </div>
+      </div>
+      <div class="mt-3">
+        <button class="btn btn-primary" type="submit">Guardar</button>
+        <a href="/odoo/review" class="btn btn-outline-secondary">Cancelar</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

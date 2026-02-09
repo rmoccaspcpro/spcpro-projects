@@ -22,6 +22,9 @@ from .models import (
     AuthSession,
     Client,
     DevelopmentEstimation,
+    OdooProject,
+    OdooTask,
+    OdooTicket,
     Project,
     TeamMember,
     User,
@@ -1495,3 +1498,217 @@ def delete_project(project_id: int, session: Session = Depends(get_session)):
     session.commit()
 
     return RedirectResponse(url=f"/clients/{client_id}?year={year}", status_code=303)
+
+
+# ============================================================================
+# Odoo Review Section (for existing tasks, tickets, and projects)
+# ============================================================================
+
+# Status mapping for Odoo tasks and tickets (0-5)
+ODOO_STATUS_MAP = {
+    0: "Pendiente",
+    1: "En Progreso",
+    2: "En Revisión",
+    3: "Completado",
+    4: "Cerrado",
+    5: "Cancelado",
+}
+
+
+def get_status_label(status: int) -> str:
+    return ODOO_STATUS_MAP.get(status, f"Estado {status}")
+
+
+@app.get("/odoo/review", name="odoo_review")
+def odoo_review(
+    request: Request,
+    session: Session = Depends(get_session),
+    search: str = "",
+    filter_type: str = "all",  # all, orphan_tickets, orphan_tasks
+):
+    """Review page for Odoo tasks, tickets, and projects."""
+    
+    # Get tasks and tickets
+    tasks = session.exec(select(OdooTask)).all()
+    tickets = session.exec(select(OdooTicket)).all()
+    projects = session.exec(select(OdooProject)).all()
+    
+    # Apply search filter
+    if search:
+        search_lower = search.lower()
+        tasks = [t for t in tasks if str(t.task_id) == search or search_lower in str(t.task_id)]
+        tickets = [t for t in tickets if str(t.ticket_id) == search or search_lower in str(t.ticket_id)]
+        projects = [p for p in projects if search_lower in p.name.lower() or str(p.project_id) == search]
+    
+    # Find orphans
+    orphan_tickets = [t for t in tickets if t.task_id is None]
+    orphan_tasks = [t for t in tasks if t.ticket_id is None]
+    
+    # Apply filter
+    if filter_type == "orphan_tickets":
+        tickets = orphan_tickets
+        tasks = []
+        projects = []
+    elif filter_type == "orphan_tasks":
+        tasks = orphan_tasks
+        tickets = []
+        projects = []
+    
+    return templates.TemplateResponse(
+        request,
+        "odoo_review.html",
+        {
+            "tasks": tasks,
+            "tickets": tickets,
+            "projects": projects,
+            "orphan_tickets_count": len(orphan_tickets),
+            "orphan_tasks_count": len(orphan_tasks),
+            "search": search,
+            "filter_type": filter_type,
+            "get_status_label": get_status_label,
+        },
+    )
+
+
+@app.get("/odoo/tasks/{task_id}/edit", name="odoo_task_edit")
+def odoo_task_edit_get(
+    task_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Edit Odoo task page."""
+    task = session.get(OdooTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    
+    return templates.TemplateResponse(
+        request,
+        "odoo_task_edit.html",
+        {
+            "task": task,
+            "get_status_label": get_status_label,
+        },
+    )
+
+
+@app.post("/odoo/tasks/{task_id}/edit", name="odoo_task_edit_post")
+def odoo_task_edit_post(
+    task_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    odoo_task_id: int = Form(...),
+    status: int = Form(...),
+    ticket_id: Optional[int] = Form(None),
+    feature_id: Optional[int] = Form(None),
+    project_id: Optional[int] = Form(None),
+):
+    """Update Odoo task."""
+    task = session.get(OdooTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    
+    task.task_id = odoo_task_id
+    task.status = status
+    task.ticket_id = ticket_id if ticket_id else None
+    task.feature_id = feature_id if feature_id else None
+    task.project_id = project_id if project_id else None
+    task.updated_at = datetime.utcnow()
+    
+    session.add(task)
+    session.commit()
+    
+    return RedirectResponse(url="/odoo/review", status_code=303)
+
+
+@app.get("/odoo/tickets/{ticket_id}/edit", name="odoo_ticket_edit")
+def odoo_ticket_edit_get(
+    ticket_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Edit Odoo ticket page."""
+    ticket = session.get(OdooTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    
+    return templates.TemplateResponse(
+        request,
+        "odoo_ticket_edit.html",
+        {
+            "ticket": ticket,
+            "get_status_label": get_status_label,
+        },
+    )
+
+
+@app.post("/odoo/tickets/{ticket_id}/edit", name="odoo_ticket_edit_post")
+def odoo_ticket_edit_post(
+    ticket_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    odoo_ticket_id: int = Form(...),
+    status: int = Form(...),
+    task_id: Optional[int] = Form(None),
+):
+    """Update Odoo ticket."""
+    ticket = session.get(OdooTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    
+    ticket.ticket_id = odoo_ticket_id
+    ticket.status = status
+    ticket.task_id = task_id if task_id else None
+    ticket.updated_at = datetime.utcnow()
+    
+    session.add(ticket)
+    session.commit()
+    
+    return RedirectResponse(url="/odoo/review", status_code=303)
+
+
+@app.get("/odoo/projects/{project_id}/edit", name="odoo_project_edit")
+def odoo_project_edit_get(
+    project_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Edit Odoo project page."""
+    project = session.get(OdooProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    return templates.TemplateResponse(
+        request,
+        "odoo_project_edit.html",
+        {
+            "project": project,
+        },
+    )
+
+
+@app.post("/odoo/projects/{project_id}/edit", name="odoo_project_edit_post")
+def odoo_project_edit_post(
+    project_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    odoo_project_id: int = Form(...),
+    name: str = Form(...),
+    keys: str = Form(""),
+    tags: str = Form(""),
+    tag_id: Optional[int] = Form(None),
+):
+    """Update Odoo project."""
+    project = session.get(OdooProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    project.project_id = odoo_project_id
+    project.name = name
+    project.keys = keys
+    project.tags = tags
+    project.tag_id = tag_id if tag_id else None
+    
+    session.add(project)
+    session.commit()
+    
+    return RedirectResponse(url="/odoo/review", status_code=303)
