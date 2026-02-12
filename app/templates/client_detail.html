@@ -52,7 +52,7 @@
 
         <h3 class="h6">Resumen</h3>
         <div class="small">
-          <div class="fw-semibold">Aprobados (cuentan en presupuesto)</div>
+          <div class="fw-semibold">Considerados (cuentan en presupuesto)</div>
           <div><strong>Soporte usado:</strong> {{ currency }} {{ used_support|money }}</div>
           <div><strong>Soporte restante:</strong> {{ currency }} {{ remaining_support|money }}</div>
           <div class="mt-2"><strong>Mejora usada:</strong> {{ currency }} {{ used_improvement|money }}</div>
@@ -131,7 +131,7 @@
             </thead>
             <tbody>
               {% for p in projects %}
-                <tr {% if p.approved is sameas(false) and p.included is sameas(false) %}class="table-secondary"{% endif %}>
+                <tr id="project-{{ p.id }}" {% if p.approved is sameas(false) and p.included is sameas(false) %}class="table-secondary"{% endif %}>
                   <td>
                     <div class="fw-semibold">{{ p.name }}</div>
                     <div class="small text-muted">
@@ -143,6 +143,9 @@
                           <span class="badge text-bg-primary ms-1">Incluido</span>
                         {% endif %}
                       {% endif %}
+                      {% if p.source_estimation_id %}
+                        <a class="badge text-bg-info text-decoration-none ms-1" href="/clients/{{ client.id }}/estimations/{{ p.source_estimation_id }}">Estimación #{{ p.source_estimation_id }}</a>
+                      {% endif %}
                     </div>
                     {% if p.description %}<div class="text-muted small">{{ p.description }}</div>{% endif %}
                   </td>
@@ -150,19 +153,32 @@
                   <td class="text-end">{{ currency }} {{ p.estimated_improvement_cost|money }}</td>
                   <td class="text-end">{{ currency }} {{ p.estimated_extra_cost|money }}</td>
                   <td class="text-end">{{ currency }} {{ p.total_estimated_cost()|money }}</td>
-                  <td class="text-end">
-                    <a class="btn btn-outline-secondary btn-sm" href="/projects/{{ p.id }}">Editar</a>
-                    {% if p.approved is sameas(false) %}
-                      <form method="post" action="/projects/{{ p.id }}/approve" class="d-inline">
+                  <td class="text-end table-actions">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Acciones proyecto">
+                      <a class="btn btn-outline-secondary" href="/projects/{{ p.id }}" data-bs-toggle="tooltip" title="Editar proyecto">
+                        <i class="bi bi-pencil"></i>
+                        <span class="d-none d-lg-inline">Editar</span>
+                      </a>
+
+                      {% if p.approved is sameas(false) %}
+                        <form method="post" action="/projects/{{ p.id }}/approve" class="d-inline">
+                          {% include "_csrf.html" %}
+                          <input type="hidden" name="next" value="/clients/{{ client.id }}?year={{ year }}" />
+                          <button class="btn btn-outline-success" type="submit" data-bs-toggle="tooltip" title="Aprobar proyecto">
+                            <i class="bi bi-check2-circle"></i>
+                            <span class="d-none d-lg-inline">Aprobar</span>
+                          </button>
+                        </form>
+                      {% endif %}
+
+                      <form method="post" action="/projects/{{ p.id }}/delete" class="d-inline">
                         {% include "_csrf.html" %}
-                        <input type="hidden" name="next" value="/clients/{{ client.id }}?year={{ year }}" />
-                        <button class="btn btn-outline-success btn-sm" type="submit">Aprobar</button>
+                        <button class="btn btn-outline-danger" type="submit" data-bs-toggle="tooltip" title="Borrar proyecto" onclick="return confirm('¿Borrar este proyecto?')">
+                          <i class="bi bi-trash"></i>
+                          <span class="d-none d-lg-inline">Borrar</span>
+                        </button>
                       </form>
-                    {% endif %}
-                    <form method="post" action="/projects/{{ p.id }}/delete" class="d-inline">
-                      {% include "_csrf.html" %}
-                      <button class="btn btn-outline-danger btn-sm" type="submit">Borrar</button>
-                    </form>
+                    </div>
                   </td>
                 </tr>
               {% else %}
@@ -179,11 +195,14 @@
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center">
           <h2 class="h5 m-0">Estimaciones</h2>
-          <a class="btn btn-outline-primary btn-sm" href="/clients/{{ client.id }}/estimations/new">Nueva</a>
+          <a class="btn btn-outline-primary btn-sm" href="/clients/{{ client.id }}/estimations/new">
+            <i class="bi bi-plus-lg"></i>
+            <span class="d-none d-sm-inline">Nueva</span>
+          </a>
         </div>
 
         <div class="table-responsive mt-3">
-          <table class="table table-sm align-middle">
+          <table class="table table-sm table-hover align-middle">
             <thead>
               <tr>
                 <th>Fecha</th>
@@ -195,13 +214,38 @@
             </thead>
             <tbody>
               {% for e in estimations %}
+                {% set linked = (estimation_project_map.get(e.id) if estimation_project_map is defined else None) %}
                 <tr>
                   <td class="text-muted small">{{ e.created_at.strftime('%Y-%m-%d') if e.created_at else '' }}</td>
                   <td>{{ e.title or '-' }}</td>
                   <td class="text-end">{{ e.sprints_needed }}</td>
                   <td class="text-end">{{ currency }} {{ e.final_cost|money }}</td>
-                  <td class="text-end">
-                    <a class="btn btn-outline-secondary btn-sm" href="/clients/{{ client.id }}/estimations/{{ e.id }}">Ver</a>
+                  <td class="text-end table-actions">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Acciones estimación">
+                      {% if linked %}
+                        <a class="btn btn-outline-secondary" href="/projects/{{ linked.project_id }}" data-bs-toggle="tooltip" title="Ver proyecto">
+                          <i class="bi bi-box-arrow-up-right"></i>
+                          <span class="d-none d-lg-inline">Proyecto</span>
+                        </a>
+                      {% else %}
+                        <a class="btn btn-outline-primary" href="/clients/{{ client.id }}/estimations/{{ e.id }}/project/new?year={{ year }}" data-bs-toggle="tooltip" title="Cargar como proyecto">
+                          <i class="bi bi-folder-plus"></i>
+                          <span class="d-none d-lg-inline">Cargar</span>
+                        </a>
+                      {% endif %}
+
+                      <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}/estimations/{{ e.id }}" data-bs-toggle="tooltip" title="Ver estimación">
+                        <i class="bi bi-eye"></i>
+                        <span class="d-none d-lg-inline">Ver</span>
+                      </a>
+                    </div>
+
+                    {% if linked %}
+                      <span class="badge text-bg-success ms-2" data-bs-toggle="tooltip" title="Ya agregada como proyecto">
+                        <i class="bi bi-check-circle-fill"></i>
+                        <span class="d-none d-md-inline">Agregado</span>
+                      </span>
+                    {% endif %}
                   </td>
                 </tr>
               {% else %}

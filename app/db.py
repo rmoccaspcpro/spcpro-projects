@@ -40,6 +40,7 @@ def _migrate_sqlite() -> None:
     cols = _sqlite_columns("project")
     if cols:
         needed = {
+            "source_estimation_id": "INTEGER",
             "estimated_support_cost": "NUMERIC",
             "estimated_improvement_cost": "NUMERIC",
             "estimated_extra_cost": "NUMERIC",

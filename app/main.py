@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 from urllib.parse import parse_qs, quote_plus
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -674,6 +674,12 @@ def _project_counts_for_totals(project: Project) -> bool:
     return approved or included
 
 
+def _project_is_approved(project: Optional[Project]) -> bool:
+    if not project:
+        return False
+    return True if project.approved is None else bool(project.approved)
+
+
 def _get_budget(session: Session, client_id: int, year: int) -> Optional[AnnualBudget]:
     statement = select(AnnualBudget).where(
         AnnualBudget.client_id == client_id,
@@ -685,35 +691,9 @@ def _get_budget(session: Session, client_id: int, year: int) -> Optional[AnnualB
 def _budget_warning_message(
     session: Session, *, client_id: int, year: int
 ) -> Optional[str]:
-    budget = _get_budget(session, client_id, year)
-    if budget is None:
-        return None
-
-    projects = session.exec(
-        select(Project).where(Project.client_id == client_id, Project.year == year)
-    ).all()
-
-    # Warning para tomar decisión: considera todos (aprobados + borradores).
-    used_support = sum((p.estimated_support_cost for p in projects), start=Decimal("0"))
-    used_improvement = sum(
-        (p.estimated_improvement_cost for p in projects), start=Decimal("0")
-    )
-
-    remaining_support = budget.support_amount - used_support
-    remaining_improvement = budget.improvement_amount - used_improvement
-
-    parts: list[str] = []
-    if remaining_support < 0:
-        parts.append(
-            f"Soporte excedido por {budget.currency} {_fmt_money(abs(remaining_support))}"
-        )
-    if remaining_improvement < 0:
-        parts.append(
-            f"Mejora excedida por {budget.currency} {_fmt_money(abs(remaining_improvement))}"
-        )
-    if not parts:
-        return None
-    return "⚠ Presupuesto excedido: " + " · ".join(parts)
+    # Por ahora, NO se muestran warnings/validaciones de presupuesto.
+    # El único warning solicitado al convertir una estimación a proyecto es el del split.
+    return None
 
 
 @app.get("/")
@@ -920,6 +900,24 @@ def client_detail(
         .order_by(DevelopmentEstimation.created_at.desc())
     ).all()
 
+    # Map estimations that were already converted into projects.
+    projects_from_estimations = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id != None)  # noqa: E711
+        .order_by(Project.created_at.desc())
+    ).all()
+    estimation_project_map: dict[int, dict] = {}
+    for p in projects_from_estimations:
+        if p.source_estimation_id is None:
+            continue
+        # Keep latest project if multiple exist.
+        if p.source_estimation_id not in estimation_project_map:
+            estimation_project_map[int(p.source_estimation_id)] = {
+                "project_id": p.id,
+                "project_year": p.year,
+            }
+
     approved_projects = [p for p in projects if _project_counts_for_totals(p)]
 
     used_support = sum(
@@ -951,9 +949,6 @@ def client_detail(
     remaining_support_all = support_amount - used_support_all
     remaining_improvement_all = improvement_amount - used_improvement_all
 
-    if message is None:
-        message = _budget_warning_message(session, client_id=client_id, year=year)
-
     return templates.TemplateResponse(
         request,
         "client_detail.html",
@@ -976,6 +971,7 @@ def client_detail(
             "remaining_support_all": remaining_support_all,
             "remaining_improvement_all": remaining_improvement_all,
             "estimations": estimations,
+            "estimation_project_map": estimation_project_map,
         },
     )
 
@@ -1146,6 +1142,7 @@ def estimation_detail_page(
     request: Request,
     client_id: int,
     estimation_id: int,
+    message: Optional[str] = Query(None),
     session: Session = Depends(get_session),
 ):
     client = session.get(Client, client_id)
@@ -1208,6 +1205,13 @@ def estimation_detail_page(
             pass
         selected_member_rows.append({"member": m, "pct": pct, "salary_used": used})
 
+    linked_project = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id == estimation_id)
+        .order_by(Project.created_at.desc())
+    ).first()
+
     return templates.TemplateResponse(
         request,
         "estimation_detail.html",
@@ -1218,8 +1222,439 @@ def estimation_detail_page(
             "items": items,
             "selected_members": selected_members,
             "selected_member_rows": selected_member_rows,
+            "linked_project": linked_project,
+            "message": message,
         },
     )
+
+
+def _q2(value: Decimal) -> Decimal:
+    try:
+        return value.quantize(Decimal("0.01"))
+    except Exception:
+        return value
+
+
+@app.get("/clients/{client_id}/estimations/{estimation_id}/project/new")
+def estimation_to_project_page(
+    request: Request,
+    client_id: int,
+    estimation_id: int,
+    year: Optional[int] = Query(None),
+    message: Optional[str] = Query(None),
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    estimation = session.get(DevelopmentEstimation, estimation_id)
+    if not estimation or estimation.client_id != client_id:
+        raise HTTPException(status_code=404, detail="Estimación no encontrada")
+
+    if year is None:
+        year = datetime.utcnow().year
+
+    existing = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id == estimation_id)
+        .order_by(Project.created_at.desc())
+    ).first()
+    if existing:
+        msg = f"Esta estimación ya fue cargada como proyecto (#{existing.id}, año {existing.year})."
+        return RedirectResponse(
+            url=(
+                f"/clients/{client_id}?year={year}&message="
+                + quote_plus(msg)
+                + f"#project-{existing.id}"
+            ),
+            status_code=303,
+        )
+
+    budget = _get_budget(session, client_id, year)
+    currency = budget.currency if budget else "ARS"
+
+    default_name = (estimation.title or "").strip()
+    if not default_name:
+        if estimation.created_at:
+            default_name = f"Estimación {estimation.created_at.strftime('%Y-%m-%d')}"
+        else:
+            default_name = "Estimación"
+
+    return templates.TemplateResponse(
+        request,
+        "estimation_to_project.html",
+        {
+            "title": "Cargar estimación como proyecto",
+            "client": client,
+            "estimation": estimation,
+            "year": year,
+            "currency": currency,
+            "default_name": default_name,
+            "support_amount": Decimal("0"),
+            "improvement_amount": _q2(estimation.final_cost or Decimal("0")),
+            "extra_amount": Decimal("0"),
+            "message": message,
+        },
+    )
+
+
+@app.post("/clients/{client_id}/estimations/{estimation_id}/project")
+def estimation_to_project_create(
+    client_id: int,
+    estimation_id: int,
+    year: int = Form(...),
+    name: str = Form(...),
+    support_amount: str = Form("0"),
+    improvement_amount: str = Form("0"),
+    extra_amount: str = Form("0"),
+    approved: Optional[str] = Form(None),
+    included: Optional[str] = Form(None),
+    description: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    estimation = session.get(DevelopmentEstimation, estimation_id)
+    if not estimation or estimation.client_id != client_id:
+        raise HTTPException(status_code=404, detail="Estimación no encontrada")
+
+    existing = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id == estimation_id)
+        .order_by(Project.created_at.desc())
+    ).first()
+    if existing:
+        msg = f"Esta estimación ya fue cargada como proyecto (#{existing.id})."
+        return RedirectResponse(
+            url=f"/clients/{client_id}?year={year}&message={quote_plus(msg)}",
+            status_code=303,
+        )
+
+    budget = _get_budget(session, client_id, year)
+    currency = budget.currency if budget else "ARS"
+
+    total = _q2(estimation.final_cost or Decimal("0"))
+    support_cost = _q2(_non_negative(_to_decimal(support_amount, default=Decimal("0"))))
+    improvement_cost = _q2(
+        _non_negative(_to_decimal(improvement_amount, default=Decimal("0")))
+    )
+    extra_cost = _q2(_non_negative(_to_decimal(extra_amount, default=Decimal("0"))))
+
+    split_sum = _q2(support_cost + improvement_cost + extra_cost)
+    diff = _q2(split_sum - total)
+    split_warning: Optional[str] = None
+    # Warning solo si el split EXCEDE el total estimado.
+    if diff > Decimal("0.01"):
+        split_warning = (
+            f"⚠ Split excede el total de la estimación: "
+            f"{currency} {_fmt_money(split_sum)} vs {currency} {_fmt_money(total)} "
+            f"(exceso: {currency} {_fmt_money(diff)})."
+        )
+
+    is_approved = approved is not None
+    is_included = True if is_approved else (included is not None)
+
+    desc = (description or "").strip()
+    if not desc:
+        desc = f"Creado desde estimación #{estimation_id}"
+    else:
+        desc = desc + f" (desde estimación #{estimation_id})"
+
+    project = Project(
+        client_id=client_id,
+        year=year,
+        name=name.strip(),
+        approved=is_approved,
+        included=is_included,
+        estimated_support_cost=_non_negative(support_cost),
+        estimated_improvement_cost=_non_negative(improvement_cost),
+        estimated_extra_cost=_non_negative(extra_cost),
+        description=desc,
+        source_estimation_id=estimation_id,
+    )
+    session.add(project)
+    session.commit()
+
+    if split_warning:
+        return RedirectResponse(
+            url=f"/clients/{client_id}?year={year}&message={quote_plus(split_warning)}",
+            status_code=303,
+        )
+
+    return RedirectResponse(url=f"/clients/{client_id}?year={year}", status_code=303)
+
+
+@app.post("/projects/{project_id}/unlink_estimation")
+def project_unlink_estimation(
+    request: Request,
+    project_id: int,
+    next: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    client_id = project.client_id
+    year = project.year
+    session.delete(project)
+    session.commit()
+
+    url = next.strip() or f"/clients/{client_id}?year={year}"
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.get("/clients/{client_id}/estimations/{estimation_id}/edit")
+def estimation_edit_page(
+    request: Request,
+    client_id: int,
+    estimation_id: int,
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    estimation = session.get(DevelopmentEstimation, estimation_id)
+    if not estimation or estimation.client_id != client_id:
+        raise HTTPException(status_code=404, detail="Estimación no encontrada")
+
+    # Include all members so previous selections don't disappear if someone was deactivated.
+    team_members = session.exec(select(TeamMember).order_by(TeamMember.name)).all()
+
+    try:
+        items = json.loads(estimation.items_json or "[]")
+        if not isinstance(items, list):
+            items = []
+    except Exception:
+        items = []
+
+    try:
+        member_ids = json.loads(estimation.team_member_ids_json or "[]")
+        if not isinstance(member_ids, list):
+            member_ids = []
+    except Exception:
+        member_ids = []
+
+    selected_ids: list[int] = []
+    for raw_id in member_ids:
+        try:
+            selected_ids.append(int(str(raw_id)))
+        except Exception:
+            continue
+    selected_ids = sorted(set(selected_ids))
+
+    try:
+        participation_raw = json.loads(estimation.team_member_participation_json or "{}")
+        if not isinstance(participation_raw, dict):
+            participation_raw = {}
+    except Exception:
+        participation_raw = {}
+
+    linked_project = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id == estimation_id)
+        .order_by(Project.created_at.desc())
+    ).first()
+
+    if linked_project and _project_is_approved(linked_project):
+        msg = "No se puede editar la estimación porque el proyecto derivado está aprobado."
+        return RedirectResponse(
+            url=f"/clients/{client_id}/estimations/{estimation_id}?message={quote_plus(msg)}",
+            status_code=303,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "estimation_edit.html",
+        {
+            "title": f"Editar estimación - {client.name}",
+            "client": client,
+            "estimation": estimation,
+            "items": items,
+            "team_members": team_members,
+            "selected_member_ids": selected_ids,
+            "participation": participation_raw,
+            "linked_project": linked_project,
+        },
+    )
+
+
+@app.post("/clients/{client_id}/estimations/{estimation_id}")
+def estimation_update(
+    client_id: int,
+    estimation_id: int,
+    title: str = Form(""),
+    notes: str = Form(""),
+    team_member_id: list[str] = Form([]),
+    team_member_participation: list[str] = Form([]),
+    feature_name: list[str] = Form([]),
+    feature_points: list[str] = Form([]),
+    testing_percent: str = Form(""),
+    buffer_percent: str = Form(""),
+    velocity: str = Form(""),
+    monthly_salary_total: str = Form(""),
+    margin_percent: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    estimation = session.get(DevelopmentEstimation, estimation_id)
+    if not estimation or estimation.client_id != client_id:
+        raise HTTPException(status_code=404, detail="Estimación no encontrada")
+
+    linked_project = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id == estimation_id)
+        .order_by(Project.created_at.desc())
+    ).first()
+    if linked_project and _project_is_approved(linked_project):
+        msg = "No se puede editar la estimación porque el proyecto derivado está aprobado."
+        return RedirectResponse(
+            url=f"/clients/{client_id}/estimations/{estimation_id}?message={quote_plus(msg)}",
+            status_code=303,
+        )
+
+    t_pct = _to_decimal(
+        testing_percent,
+        default=_to_decimal(DEFAULT_TESTING_PERCENT, default=Decimal("20")),
+    )
+    b_pct = _to_decimal(
+        buffer_percent,
+        default=_to_decimal(DEFAULT_BUFFER_PERCENT, default=Decimal("0")),
+    )
+    m_pct = _to_decimal(
+        margin_percent,
+        default=_to_decimal(DEFAULT_MARGIN_PERCENT, default=Decimal("35")),
+    )
+    vel = _to_decimal(velocity, default=Decimal("0"))
+
+    selected_ids: list[int] = []
+    for raw_id in team_member_id:
+        try:
+            selected_ids.append(int(str(raw_id)))
+        except Exception:
+            continue
+    selected_ids = sorted(set(selected_ids))
+
+    # Parse participations sent as repeated fields: "<id>:<pct>".
+    participation_by_id: dict[int, Decimal] = {}
+    for raw in team_member_participation:
+        try:
+            s = str(raw)
+            if ":" not in s:
+                continue
+            id_str, pct_str = s.split(":", 1)
+            member_id = int(id_str.strip())
+            pct = _to_decimal(pct_str.strip(), default=Decimal("100"))
+            if pct < 0:
+                pct = Decimal("0")
+            if pct > 100:
+                pct = Decimal("100")
+            participation_by_id[member_id] = pct
+        except Exception:
+            continue
+
+    salary_total = _to_decimal(monthly_salary_total, default=Decimal("0"))
+    participation_json: dict[str, str] = {}
+    if selected_ids:
+        members = session.exec(select(TeamMember).where(TeamMember.id.in_(selected_ids))).all()
+        salary_total = Decimal("0")
+        for m in members:
+            pct = participation_by_id.get(m.id or 0, Decimal("100"))
+            participation_json[str(m.id)] = str(pct)
+            salary_total += (m.monthly_salary * pct) / Decimal("100")
+
+    items: list[dict] = []
+    points_sum = Decimal("0")
+    max_len = max(len(feature_name), len(feature_points), 0)
+    for i in range(max_len):
+        name = (feature_name[i] if i < len(feature_name) else "").strip()
+        pts_str = (feature_points[i] if i < len(feature_points) else "").strip()
+        if not name and not pts_str:
+            continue
+        pts = _non_negative(_to_decimal(pts_str, default=Decimal("0")))
+        items.append({"name": name, "points": str(pts)})
+        points_sum += pts
+
+    calc = _calc_development_estimation(
+        items_points_sum=points_sum,
+        testing_percent=t_pct,
+        buffer_percent=b_pct,
+        velocity=vel,
+        monthly_salary_total=salary_total,
+        margin_percent=m_pct,
+    )
+
+    estimation.title = title.strip()
+    estimation.notes = notes.strip()
+    estimation.items_json = json.dumps(items, ensure_ascii=False)
+    estimation.team_member_ids_json = json.dumps(selected_ids, ensure_ascii=False)
+    estimation.team_member_participation_json = json.dumps(participation_json, ensure_ascii=False)
+
+    estimation.points_sum = calc["points_sum"]
+    estimation.testing_percent = t_pct
+    estimation.testing_points = calc["testing_points"]
+    estimation.buffer_percent = b_pct
+    estimation.buffer_points = calc["buffer_points"]
+    estimation.total_points = calc["total_points"]
+    estimation.velocity = vel
+    estimation.sprints_raw = calc["sprints_raw"]
+    estimation.sprints_needed = int(calc["sprints_needed"])
+    estimation.monthly_salary_total = salary_total
+    estimation.cost_per_sprint = calc["cost_per_sprint"]
+    estimation.total_cost = calc["total_cost"]
+    estimation.margin_percent = m_pct
+    estimation.margin_amount = calc["margin_amount"]
+    estimation.final_cost = calc["final_cost"]
+
+    session.add(estimation)
+    session.commit()
+
+    return RedirectResponse(
+        url=f"/clients/{client_id}/estimations/{estimation_id}", status_code=303
+    )
+
+
+@app.post("/clients/{client_id}/estimations/{estimation_id}/delete")
+def estimation_delete(
+    client_id: int,
+    estimation_id: int,
+    session: Session = Depends(get_session),
+):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    estimation = session.get(DevelopmentEstimation, estimation_id)
+    if not estimation or estimation.client_id != client_id:
+        raise HTTPException(status_code=404, detail="Estimación no encontrada")
+
+    linked_project = session.exec(
+        select(Project)
+        .where(Project.client_id == client_id)
+        .where(Project.source_estimation_id == estimation_id)
+        .order_by(Project.created_at.desc())
+    ).first()
+    if linked_project:
+        msg = "No se puede borrar la estimación porque ya existe un proyecto creado desde ella. Borrá el proyecto primero."
+        return RedirectResponse(
+            url=f"/clients/{client_id}/estimations/{estimation_id}?message={quote_plus(msg)}",
+            status_code=303,
+        )
+
+    session.delete(estimation)
+    session.commit()
+    return RedirectResponse(url=f"/clients/{client_id}", status_code=303)
 
 
 @app.post("/clients/{client_id}/budgets/{year}")
@@ -1281,13 +1716,6 @@ def create_project(
     session.add(project)
     session.commit()
 
-    warning = _budget_warning_message(session, client_id=client_id, year=year)
-    if warning:
-        return RedirectResponse(
-            url=f"/clients/{client_id}?year={year}&message={quote_plus(warning)}",
-            status_code=303,
-        )
-
     return RedirectResponse(url=f"/clients/{client_id}?year={year}", status_code=303)
 
 
@@ -1344,15 +1772,6 @@ def update_project(
 
     session.add(project)
     session.commit()
-
-    warning = _budget_warning_message(
-        session, client_id=project.client_id, year=project.year
-    )
-    if warning:
-        return RedirectResponse(
-            url=f"/clients/{project.client_id}?year={project.year}&message={quote_plus(warning)}",
-            status_code=303,
-        )
 
     return RedirectResponse(
         url=f"/clients/{project.client_id}?year={project.year}", status_code=303

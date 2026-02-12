@@ -8,7 +8,26 @@
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}">Volver</a>
+    {% if linked_project and (linked_project.approved is not sameas(false)) %}
+      <button class="btn btn-outline-secondary" type="button" disabled title="Proyecto aprobado: estimación bloqueada">Editar</button>
+    {% else %}
+      <a class="btn btn-outline-primary" href="/clients/{{ client.id }}/estimations/{{ estimation.id }}/edit">Editar</a>
+    {% endif %}
+    {% if linked_project %}
+      <a class="btn btn-outline-secondary" href="/projects/{{ linked_project.id }}">Ver proyecto</a>
+      <button class="btn btn-secondary" type="button" disabled>Ya agregado</button>
+    {% else %}
+      <a class="btn btn-primary" href="/clients/{{ client.id }}/estimations/{{ estimation.id }}/project/new">Cargar como proyecto</a>
+    {% endif %}
     <a class="btn btn-outline-primary" href="/clients/{{ client.id }}/estimations/new">Nueva estimación</a>
+    {% if linked_project %}
+      <button class="btn btn-outline-danger" type="button" disabled title="Borrá el proyecto primero">Borrar</button>
+    {% else %}
+      <form method="post" action="/clients/{{ client.id }}/estimations/{{ estimation.id }}/delete" class="d-inline">
+        {% include "_csrf.html" %}
+        <button class="btn btn-outline-danger" type="submit" onclick="return confirm('¿Borrar esta estimación?')">Borrar</button>
+      </form>
+    {% endif %}
   </div>
 </div>
 

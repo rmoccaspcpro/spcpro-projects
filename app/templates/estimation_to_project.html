@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Cargar estimación como proyecto</h1>
+    <div class="text-muted">Cliente: <strong>{{ client.name }}</strong></div>
+    <div class="text-muted small">Estimación: <a href="/clients/{{ client.id }}/estimations/{{ estimation.id }}">#{{ estimation.id }}</a></div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}?year={{ year }}">Volver</a>
+  </div>
+</div>
+
+{% if message %}
+  <div class="alert alert-warning">{{ message }}</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+          <div>
+            <h2 class="h5 m-0">Nuevo proyecto desde estimación</h2>
+            <div class="text-muted small">Cargá los importes a imputar (no tienen que coincidir con el total; si difieren se muestra una advertencia).</div>
+          </div>
+          <div class="text-end">
+            <div class="text-muted small">Total estimación</div>
+            <div class="h5 m-0">{{ currency }} {{ estimation.final_cost|money }}</div>
+          </div>
+        </div>
+
+        <form method="post" action="/clients/{{ client.id }}/estimations/{{ estimation.id }}/project" id="toProjectForm" class="mt-3">
+          {% include "_csrf.html" %}
+
+          <div class="row g-2">
+            <div class="col-md-3">
+              <label class="form-label">Año</label>
+              <input class="form-control" name="year" type="number" value="{{ year }}" />
+            </div>
+            <div class="col-md-9">
+              <label class="form-label">Nombre del proyecto</label>
+              <input class="form-control" name="name" value="{{ default_name }}" required />
+            </div>
+
+            <div class="col-12">
+              <div class="row g-2">
+                <div class="col-md-4">
+                  <label class="form-label">Soporte</label>
+                  <div class="input-group">
+                    <span class="input-group-text">{{ currency }}</span>
+                    <input class="form-control text-end" name="support_amount" id="support_amount" type="text" inputmode="decimal" value="{{ support_amount|money_input }}" />
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Mejora</label>
+                  <div class="input-group">
+                    <span class="input-group-text">{{ currency }}</span>
+                    <input class="form-control text-end" name="improvement_amount" id="improvement_amount" type="text" inputmode="decimal" value="{{ improvement_amount|money_input }}" />
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Extra</label>
+                  <div class="input-group">
+                    <span class="input-group-text">{{ currency }}</span>
+                    <input class="form-control text-end" name="extra_amount" id="extra_amount" type="text" inputmode="decimal" value="{{ extra_amount|money_input }}" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="approved" value="1" id="approved" />
+                    <label class="form-check-label" for="approved">Aprobar (queda incluido y bloqueado)</label>
+                  </div>
+                  <div class="form-check mt-1" id="includedWrap">
+                    <input class="form-check-input" type="checkbox" name="included" value="1" id="included" checked />
+                    <label class="form-check-label" for="included">Incluir en cuentas (simulación si es borrador)</label>
+                  </div>
+                </div>
+                <div class="text-end small">
+                  <div class="text-muted">Total split</div>
+                  <div class="fw-semibold" id="out_sum">0,00</div>
+                  <div class="text-muted">Diferencia vs estimación</div>
+                  <div class="fw-semibold" id="out_diff">0,00</div>
+                </div>
+              </div>
+              <div class="alert alert-warning small mt-2 mb-0 d-none" id="diffAlert"></div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">Descripción (opcional)</label>
+              <input class="form-control" name="description" placeholder="Ej: Creado desde estimación" />
+              <div class="form-text">Se guarda un vínculo a la estimación para trazabilidad.</div>
+            </div>
+          </div>
+
+          <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-success" type="submit">Crear proyecto</button>
+            <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}?year={{ year }}">Cancelar</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Resumen</h2>
+        <div class="small">
+          <div><strong>Título estimación:</strong> {{ estimation.title or '-' }}</div>
+          <div><strong>Final estimación:</strong> {{ currency }} {{ estimation.final_cost|money }}</div>
+          <div class="text-muted">Creada: {{ estimation.created_at.strftime('%Y-%m-%d %H:%M') if estimation.created_at else '' }}</div>
+          <hr />
+          <div class="text-muted">Tip</div>
+          <div class="text-muted">Si querés imputar sólo una parte a Soporte/Mejora, cargá esos importes directamente; no es necesario que cierren contra el total.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function parseNumber(value) {
+    if (!value) return 0;
+    const s = String(value).trim().replace(/\s+/g, '');
+    if (!s) return 0;
+
+    const hasDot = s.includes('.');
+    const hasComma = s.includes(',');
+
+    let normalized = s;
+    if (hasDot && hasComma) {
+      const lastDot = s.lastIndexOf('.');
+      const lastComma = s.lastIndexOf(',');
+      if (lastComma > lastDot) {
+        normalized = s.replace(/\./g, '').replace(/,/g, '.');
+      } else {
+        normalized = s.replace(/,/g, '');
+      }
+    } else if (hasComma) {
+      normalized = s.replace(/,/g, '.');
+    } else {
+      normalized = s.replace(/,/g, '');
+    }
+
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function fmtMoneyAR(n) {
+    const v = Number.isFinite(n) ? n : 0;
+    return v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  const total = parseNumber('{{ estimation.final_cost|money_input }}');
+
+  function refreshSplit() {
+    const s = Math.max(0, parseNumber(document.getElementById('support_amount').value));
+    const i = Math.max(0, parseNumber(document.getElementById('improvement_amount').value));
+    const e = Math.max(0, parseNumber(document.getElementById('extra_amount').value));
+    const sum = s + i + e;
+
+    const approved = document.getElementById('approved').checked;
+    document.getElementById('includedWrap').style.display = approved ? 'none' : '';
+
+    document.getElementById('out_sum').textContent = `${'{{ currency }}'} ${fmtMoneyAR(sum)}`;
+    const diff = sum - total;
+    const sign = diff > 0 ? '+' : '';
+    document.getElementById('out_diff').textContent = `${sign}${'{{ currency }}'} ${fmtMoneyAR(diff)}`;
+
+    const alert = document.getElementById('diffAlert');
+    if (diff > 0.01) {
+      alert.classList.remove('d-none');
+      alert.textContent = `El split (${ '{{ currency }}' } ${fmtMoneyAR(sum)}) excede el total de la estimación (${ '{{ currency }}' } ${fmtMoneyAR(total)}) por ${'{{ currency }}'} ${fmtMoneyAR(diff)}.`;
+    } else {
+      alert.classList.add('d-none');
+      alert.textContent = '';
+    }
+  }
+
+  document.getElementById('toProjectForm').addEventListener('input', refreshSplit);
+  refreshSplit();
+</script>
+{% endblock %}

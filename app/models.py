@@ -39,6 +39,11 @@ class Project(SQLModel, table=True):
     client_id: int = Field(index=True, foreign_key="client.id")
     year: int = Field(index=True)
 
+    # Optional link when a project is created from an estimation.
+    source_estimation_id: Optional[int] = Field(
+        default=None, index=True, foreign_key="developmentestimation.id"
+    )
+
     name: str
 
     # Legacy (DB): en versiones previas existía `status` y puede estar con NOT NULL.

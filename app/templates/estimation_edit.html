@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Editar estimación</h1>
+    <div class="text-muted">Cliente: <strong>{{ client.name }}</strong></div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}/estimations/{{ estimation.id }}">Volver</a>
+    {% if linked_project %}
+      <button class="btn btn-outline-danger" type="button" disabled title="Borrá el proyecto primero">Borrar</button>
+    {% else %}
+      <form method="post" action="/clients/{{ client.id }}/estimations/{{ estimation.id }}/delete" class="d-inline">
+        {% include "_csrf.html" %}
+        <button class="btn btn-outline-danger" type="submit" onclick="return confirm('¿Borrar esta estimación?')">Borrar</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post" action="/clients/{{ client.id }}/estimations/{{ estimation.id }}" id="estimationForm">
+  {% include "_csrf.html" %}
+
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-body">
+          <h2 class="h5">Funcionalidades</h2>
+          <div class="text-muted small mb-2">Cargá el listado y su puntaje. Testing y buffer se calculan automáticamente por porcentaje.</div>
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle" id="featuresTable">
+              <thead>
+                <tr>
+                  <th>Funcionalidad</th>
+                  <th class="text-end" style="width: 160px;">Puntos</th>
+                  <th class="text-end" style="width: 90px;"></th>
+                </tr>
+              </thead>
+              <tbody id="featuresBody">
+                {% for it in items %}
+                  <tr>
+                    <td><input class="form-control" name="feature_name" value="{{ it.name if it.name is defined else it["name"] }}" /></td>
+                    <td><input class="form-control text-end" name="feature_points" inputmode="decimal" value="{{ (it.points if it.points is defined else it["points"])|dec2 }}" /></td>
+                    <td class="text-end">
+                      <button class="btn btn-outline-danger btn-sm" type="button" data-action="remove">Quitar</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+                <tr>
+                  <td><input class="form-control" name="feature_name" placeholder="Ej: Login" /></td>
+                  <td><input class="form-control text-end" name="feature_points" inputmode="decimal" placeholder="0" /></td>
+                  <td class="text-end">
+                    <button class="btn btn-outline-danger btn-sm" type="button" data-action="remove">Quitar</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" type="button" id="addFeature">Agregar fila</button>
+          </div>
+
+          <hr />
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Título (opcional)</label>
+              <input class="form-control" name="title" value="{{ estimation.title }}" />
+            </div>
+            <div class="col-6"></div>
+            <div class="col-12">
+              <label class="form-label">Notas (opcional)</label>
+              <textarea class="form-control" name="notes" rows="3">{{ estimation.notes }}</textarea>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-body">
+          <h2 class="h5">Parámetros</h2>
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Testing (%)</label>
+              <input class="form-control text-end" name="testing_percent" id="testing_percent" inputmode="decimal" value="{{ estimation.testing_percent|dec2 }}" />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Buffer (%)</label>
+              <input class="form-control text-end" name="buffer_percent" id="buffer_percent" inputmode="decimal" value="{{ estimation.buffer_percent|dec2 }}" />
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">Equipo</label>
+              <div class="border rounded p-2" id="teamBox">
+                {% for m in team_members %}
+                  {% set is_checked = (m.id in selected_member_ids) %}
+                  {% set pct_val = participation.get(m.id|string, '100') %}
+                  <div class="d-flex align-items-center gap-2 mb-1">
+                    <div class="form-check m-0 flex-grow-1">
+                      <input class="form-check-input team-member" type="checkbox" name="team_member_id" value="{{ m.id }}" id="tm_{{ m.id }}" data-salary="{{ m.monthly_salary|money_input }}" {% if is_checked %}checked{% endif %} />
+                      <label class="form-check-label" for="tm_{{ m.id }}">
+                        {{ m.name }}
+                        <span class="text-muted small">({{ m.monthly_salary|money }})</span>
+                      </label>
+                    </div>
+
+                    <div class="input-group input-group-sm" style="max-width: 160px;">
+                      <span class="input-group-text">%</span>
+                      <input class="form-control text-end team-member-pct" type="text" inputmode="decimal" id="tm_pct_{{ m.id }}" data-member-id="{{ m.id }}" value="{{ pct_val|dec2 }}" {% if not is_checked %}disabled{% endif %} />
+                    </div>
+
+                    <input type="hidden" name="team_member_participation" id="tmp_{{ m.id }}" value="{{ m.id }}:{{ pct_val }}" {% if not is_checked %}disabled{% endif %} />
+                  </div>
+                {% else %}
+                  <div class="text-muted small">No hay miembros. Podés cargarlos en <a href="/team">Equipo</a>.</div>
+                {% endfor %}
+              </div>
+              <div class="form-text">Se calcula como sueldo * (participación %). Si no seleccionás nadie, podés cargar el total manual.</div>
+            </div>
+
+            <div class="col-6">
+              <label class="form-label">Velocidad equipo</label>
+              <input class="form-control text-end" name="velocity" id="velocity" inputmode="decimal" value="{{ estimation.velocity|dec2 }}" />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Sueldos equipo (mensual)</label>
+              <input class="form-control text-end" name="monthly_salary_total" id="monthly_salary_total" inputmode="decimal" value="{{ estimation.monthly_salary_total|money_input }}" />
+              <div class="form-text">Costo por sprint = sueldos / 2</div>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Margen (%)</label>
+              <input class="form-control text-end" name="margin_percent" id="margin_percent" inputmode="decimal" value="{{ estimation.margin_percent|dec2 }}" />
+            </div>
+            <div class="col-6"></div>
+          </div>
+
+          <hr />
+
+          <h3 class="h6">Resultado (preview)</h3>
+          <div class="small">
+            <div><strong>Puntos (funcionalidades):</strong> <span id="out_points_sum">0</span></div>
+            <div><strong>Testing (pts):</strong> <span id="out_testing_points">0</span></div>
+            <div><strong>Buffer (pts):</strong> <span id="out_buffer_points">0</span></div>
+            <div class="mt-1"><strong>Total puntos:</strong> <span id="out_total_points">0</span></div>
+            <div class="mt-2"><strong>Sprints (raw):</strong> <span id="out_sprints_raw">0</span></div>
+            <div><strong>Sprints necesarios (ceil):</strong> <span id="out_sprints_needed">0</span></div>
+            <div class="mt-2"><strong>Costo por sprint:</strong> <span id="out_cost_per_sprint">0</span></div>
+            <div><strong>Total:</strong> <span id="out_total_cost">0</span></div>
+            <div><strong>Margen:</strong> <span id="out_margin_amount">0</span></div>
+            <div class="mt-1"><strong>Estimación final:</strong> <span id="out_final_cost">0</span></div>
+          </div>
+
+          <div class="mt-3">
+            <button class="btn btn-primary" type="submit">Guardar cambios</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-secondary mt-3 small mb-0">
+        Nota: el cálculo final se guarda en servidor al enviar.
+      </div>
+    </div>
+  </div>
+</form>
+
+<script>
+  function parseNumber(value) {
+    if (!value) return 0;
+    const s = String(value).trim().replace(/\s+/g, '');
+    if (!s) return 0;
+
+    const hasDot = s.includes('.');
+    const hasComma = s.includes(',');
+
+    let normalized = s;
+    if (hasDot && hasComma) {
+      const lastDot = s.lastIndexOf('.');
+      const lastComma = s.lastIndexOf(',');
+      if (lastComma > lastDot) {
+        normalized = s.replace(/\./g, '').replace(/,/g, '.');
+      } else {
+        normalized = s.replace(/,/g, '');
+      }
+    } else if (hasComma) {
+      normalized = s.replace(/,/g, '.');
+    } else {
+      normalized = s.replace(/,/g, '');
+    }
+
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function ceilToInt(n) {
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.ceil(n);
+  }
+
+  function refreshPreview() {
+    const names = Array.from(document.querySelectorAll('input[name="feature_name"]'));
+    const points = Array.from(document.querySelectorAll('input[name="feature_points"]'));
+
+    let sum = 0;
+    for (let i = 0; i < Math.max(names.length, points.length); i++) {
+      const pts = parseNumber(points[i]?.value);
+      sum += Math.max(0, pts);
+    }
+
+    const testingPct = Math.max(0, parseNumber(document.getElementById('testing_percent').value));
+    const bufferPct = Math.max(0, parseNumber(document.getElementById('buffer_percent').value));
+    const velocity = Math.max(0, parseNumber(document.getElementById('velocity').value));
+    const teamChecks = Array.from(document.querySelectorAll('.team-member'));
+    let selectedSalaryTotal = 0;
+    let selectedCount = 0;
+    for (const el of teamChecks) {
+      const memberId = el.value;
+      const pctInput = document.getElementById(`tm_pct_${memberId}`);
+      const hidden = document.getElementById(`tmp_${memberId}`);
+      if (pctInput) pctInput.disabled = !el.checked;
+      if (hidden) hidden.disabled = !el.checked;
+
+      if (el.checked) {
+        selectedCount += 1;
+        const pct = Math.min(100, Math.max(0, parseNumber(pctInput ? pctInput.value : '100')));
+        if (hidden) hidden.value = `${memberId}:${pct}`;
+        selectedSalaryTotal += Math.max(0, parseNumber(el.dataset.salary)) * (pct / 100);
+      }
+    }
+
+    const salaryInput = document.getElementById('monthly_salary_total');
+    const salaryTotalManual = Math.max(0, parseNumber(salaryInput.value));
+    const salaryTotal = selectedCount > 0 ? selectedSalaryTotal : salaryTotalManual;
+    if (selectedCount > 0) {
+      salaryInput.value = salaryTotal.toFixed(2);
+    }
+    const marginPct = Math.max(0, parseNumber(document.getElementById('margin_percent').value));
+
+    const testingPts = sum * (testingPct / 100);
+    const subtotalPts = sum + testingPts;
+    const bufferPts = subtotalPts * (bufferPct / 100);
+    const totalPts = subtotalPts + bufferPts;
+
+    const sprintsRaw = velocity > 0 ? (totalPts / velocity) : 0;
+    const sprintsNeeded = velocity > 0 ? ceilToInt(sprintsRaw) : 0;
+
+    const costPerSprint = salaryTotal / 2;
+    const totalCost = costPerSprint * sprintsNeeded;
+    const marginAmount = totalCost * (marginPct / 100);
+    const finalCost = totalCost + marginAmount;
+
+    const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : '0.00');
+
+    document.getElementById('out_points_sum').textContent = fmt(sum);
+    document.getElementById('out_testing_points').textContent = fmt(testingPts);
+    document.getElementById('out_buffer_points').textContent = fmt(bufferPts);
+    document.getElementById('out_total_points').textContent = fmt(totalPts);
+
+    document.getElementById('out_sprints_raw').textContent = fmt(sprintsRaw);
+    document.getElementById('out_sprints_needed').textContent = String(sprintsNeeded);
+
+    document.getElementById('out_cost_per_sprint').textContent = fmt(costPerSprint);
+    document.getElementById('out_total_cost').textContent = fmt(totalCost);
+    document.getElementById('out_margin_amount').textContent = fmt(marginAmount);
+    document.getElementById('out_final_cost').textContent = fmt(finalCost);
+  }
+
+  function addFeatureRow() {
+    const tbody = document.getElementById('featuresBody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="form-control" name="feature_name" placeholder="Ej: Login" /></td>
+      <td><input class="form-control text-end" name="feature_points" inputmode="decimal" placeholder="0" /></td>
+      <td class="text-end"><button class="btn btn-outline-danger btn-sm" type="button" data-action="remove">Quitar</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('addFeature').addEventListener('click', () => {
+    addFeatureRow();
+  });
+
+  document.getElementById('featuresTable').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="remove"]');
+    if (!btn) return;
+    const row = btn.closest('tr');
+    if (row) row.remove();
+    refreshPreview();
+  });
+
+  document.getElementById('estimationForm').addEventListener('input', refreshPreview);
+  refreshPreview();
+</script>
+{% endblock %}

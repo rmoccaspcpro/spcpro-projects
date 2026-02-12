@@ -4,11 +4,25 @@
   <div>
     <h1 class="h3 m-0">Editar proyecto</h1>
     <div class="text-muted">{{ client.name }} · {{ project.year }}</div>
+    {% if project.source_estimation_id %}
+      <div class="text-muted small">Desde <a href="/clients/{{ client.id }}/estimations/{{ project.source_estimation_id }}">estimación #{{ project.source_estimation_id }}</a></div>
+    {% endif %}
   </div>
   <div>
     <a class="btn btn-outline-secondary" href="/clients/{{ client.id }}?year={{ project.year }}">Volver</a>
   </div>
 </div>
+
+{% if project.source_estimation_id %}
+  <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="small">Este proyecto fue creado desde una estimación. Para volver a poder “Cargar como proyecto” esa estimación, se debe eliminar este proyecto.</div>
+    <form method="post" action="/projects/{{ project.id }}/unlink_estimation">
+      {% include "_csrf.html" %}
+      <input type="hidden" name="next" value="/clients/{{ client.id }}/estimations/{{ project.source_estimation_id }}" />
+      <button class="btn btn-danger btn-sm" type="submit" onclick="return confirm('Esto eliminará el proyecto. ¿Continuar?')">Eliminar proyecto</button>
+    </form>
+  </div>
+{% endif %}
 
 <div class="card">
   <div class="card-body">
