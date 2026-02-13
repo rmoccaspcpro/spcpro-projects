@@ -107,6 +107,105 @@ def _migrate_sqlite() -> None:
                 )
             )
 
+    # Migrate Odoo tables (for review section)
+    # These tables store Odoo tasks, tickets, and projects for review
+    _migrate_odoo_tables()
+
+
+def _migrate_odoo_tables() -> None:
+    """Migración para tablas de Odoo (idempotente).
+    
+    Crea las tablas odoo_projects, odoo_tasks, y odoo_tickets si no existen.
+    Valida la existencia antes de ejecutar para evitar errores.
+    """
+    
+    # Migrate odoo_projects table
+    odoo_projects_cols = _sqlite_columns("odoo_projects")
+    if not odoo_projects_cols:
+        # Table doesn't exist, create it
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS odoo_projects (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER NOT NULL,
+                        name TEXT NOT NULL DEFAULT '',
+                        keys TEXT NOT NULL DEFAULT '',
+                        tags TEXT NOT NULL DEFAULT '',
+                        tag_id INTEGER,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_projects_project_id ON odoo_projects (project_id)")
+            )
+    
+    # Migrate odoo_tasks table
+    odoo_tasks_cols = _sqlite_columns("odoo_tasks")
+    if not odoo_tasks_cols:
+        # Table doesn't exist, create it
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS odoo_tasks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id INTEGER NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        status INTEGER NOT NULL DEFAULT 0,
+                        ticket_id INTEGER,
+                        feature_id INTEGER,
+                        project_id INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tasks_task_id ON odoo_tasks (task_id)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tasks_status ON odoo_tasks (status)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tasks_ticket_id ON odoo_tasks (ticket_id)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tasks_project_id ON odoo_tasks (project_id)")
+            )
+    
+    # Migrate odoo_tickets table
+    odoo_tickets_cols = _sqlite_columns("odoo_tickets")
+    if not odoo_tickets_cols:
+        # Table doesn't exist, create it
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS odoo_tickets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ticket_id INTEGER NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        status INTEGER NOT NULL DEFAULT 0,
+                        task_id INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tickets_ticket_id ON odoo_tickets (ticket_id)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tickets_status ON odoo_tickets (status)")
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_odoo_tickets_task_id ON odoo_tickets (task_id)")
+            )
+
 
 def get_session() -> Session:
     return Session(engine)

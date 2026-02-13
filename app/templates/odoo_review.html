@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Revisión de Odoo</h1>
+    <div class="text-muted">Tareas, Tickets y Proyectos</div>
+  </div>
+  <div>
+    <a class="btn btn-outline-secondary" href="/">Volver</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" action="/odoo/review" class="row g-2">
+      <div class="col-md-4">
+        <input 
+          type="text" 
+          name="search" 
+          class="form-control" 
+          placeholder="Buscar por número o nombre..." 
+          value="{{ search }}"
+        />
+      </div>
+      <div class="col-md-4">
+        <select name="filter_type" class="form-select">
+          <option value="all" {% if filter_type == "all" %}selected{% endif %}>Todos</option>
+          <option value="orphan_tickets" {% if filter_type == "orphan_tickets" %}selected{% endif %}>
+            Solo Tickets sin Tareas ({{ orphan_tickets_count }})
+          </option>
+          <option value="orphan_tasks" {% if filter_type == "orphan_tasks" %}selected{% endif %}>
+            Solo Tareas sin Tickets ({{ orphan_tasks_count }})
+          </option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary w-100">Buscar</button>
+      </div>
+      <div class="col-md-2">
+        <a href="/odoo/review" class="btn btn-outline-secondary w-100">Limpiar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  <strong>Resumen:</strong>
+  {{ orphan_tickets_count }} tickets sin tareas | 
+  {{ orphan_tasks_count }} tareas sin tickets
+</div>
+
+{% if tickets %}
+<div class="card mb-3">
+  <div class="card-header">
+    <h2 class="h5 m-0">Tickets ({{ tickets|length }})</h2>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Ticket ID</th>
+            <th>Estado</th>
+            <th>Task ID</th>
+            <th>Actualizado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ticket in tickets %}
+          <tr {% if ticket.task_id is none %}class="table-warning"{% endif %}>
+            <td>{{ ticket.id }}</td>
+            <td>{{ ticket.ticket_id }}</td>
+            <td>
+              <span class="badge bg-secondary">
+                {{ get_status_label(ticket.status) }}
+              </span>
+            </td>
+            <td>
+              {% if ticket.task_id %}
+                {{ ticket.task_id }}
+              {% else %}
+                <span class="text-danger">Sin Tarea</span>
+              {% endif %}
+            </td>
+            <td>{{ ticket.updated_at.strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '-' }}</td>
+            <td>
+              <a href="/odoo/tickets/{{ ticket.id }}/edit" class="btn btn-sm btn-outline-primary">
+                Editar
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if tasks %}
+<div class="card mb-3">
+  <div class="card-header">
+    <h2 class="h5 m-0">Tareas ({{ tasks|length }})</h2>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Task ID</th>
+            <th>Estado</th>
+            <th>Ticket ID</th>
+            <th>Project ID</th>
+            <th>Actualizado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+          <tr {% if task.ticket_id is none %}class="table-warning"{% endif %}>
+            <td>{{ task.id }}</td>
+            <td>{{ task.task_id }}</td>
+            <td>
+              <span class="badge bg-secondary">
+                {{ get_status_label(task.status) }}
+              </span>
+            </td>
+            <td>
+              {% if task.ticket_id %}
+                {{ task.ticket_id }}
+              {% else %}
+                <span class="text-danger">Sin Ticket</span>
+              {% endif %}
+            </td>
+            <td>{{ task.project_id if task.project_id else '-' }}</td>
+            <td>{{ task.updated_at.strftime('%Y-%m-%d %H:%M') if task.updated_at else '-' }}</td>
+            <td>
+              <a href="/odoo/tasks/{{ task.id }}/edit" class="btn btn-sm btn-outline-primary">
+                Editar
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if projects %}
+<div class="card mb-3">
+  <div class="card-header">
+    <h2 class="h5 m-0">Proyectos ({{ projects|length }})</h2>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Project ID</th>
+            <th>Nombre</th>
+            <th>Keys</th>
+            <th>Tags</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for project in projects %}
+          <tr>
+            <td>{{ project.id }}</td>
+            <td>{{ project.project_id }}</td>
+            <td>{{ project.name }}</td>
+            <td>{{ project.keys if project.keys else '-' }}</td>
+            <td>{{ project.tags if project.tags else '-' }}</td>
+            <td>
+              <a href="/odoo/projects/{{ project.id }}/edit" class="btn btn-sm btn-outline-primary">
+                Editar
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if not tickets and not tasks and not projects %}
+<div class="alert alert-secondary">
+  No se encontraron resultados.
+</div>
+{% endif %}
+
+{% endblock %}
