@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 from .db import engine, get_session, init_db
 from .models import (
     AnnualBudget,
+    AppConfig,
     AuthSession,
     Client,
     DevelopmentEstimation,
@@ -567,6 +568,55 @@ def team_delete(
     )
 
 
+@app.get("/config")
+def config_page(
+    request: Request,
+    message: Optional[str] = None,
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    config = _get_app_config(session)
+    return templates.TemplateResponse(
+        request,
+        "config.html",
+        {"title": "Configuración", "config": config, "message": message},
+    )
+
+
+@app.post("/config")
+def config_update(
+    request: Request,
+    sprint_days: str = Form(...),
+    sprints_per_month: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    _require_admin(request)
+    config = _get_app_config(session)
+    
+    try:
+        days = int(sprint_days.strip())
+        if days <= 0:
+            days = 14
+        config.sprint_days = days
+    except (ValueError, AttributeError):
+        config.sprint_days = 14
+    
+    config.sprints_per_month = _non_negative(
+        _to_decimal(sprints_per_month, default=Decimal("2"))
+    )
+    if config.sprints_per_month <= 0:
+        config.sprints_per_month = Decimal("2")
+    
+    config.updated_at = datetime.utcnow()
+    session.add(config)
+    session.commit()
+    
+    return RedirectResponse(
+        url="/config?message=" + quote_plus("Configuración actualizada."),
+        status_code=303
+    )
+
+
 def _to_decimal(value: Optional[str], default: Decimal = Decimal("0")) -> Decimal:
     if value is None:
         return default
@@ -637,17 +687,31 @@ def _parse_sprints_needed(value: Optional[str]) -> int:
 
 
 def _calc_project_end_date(
-    *, start_date: Optional[date], sprints_needed: int
+    *, start_date: Optional[date], sprints_needed: int, sprint_days: int
 ) -> Optional[date]:
     if not start_date:
         return None
     if sprints_needed <= 0:
         return None
-    return start_date + timedelta(days=14 * int(sprints_needed))
+    return start_date + timedelta(days=sprint_days * int(sprints_needed))
 
 
 def _non_negative(value: Decimal) -> Decimal:
     return value if value >= 0 else Decimal("0")
+
+
+def _get_app_config(session: Session) -> AppConfig:
+    """Get or create app configuration."""
+    stmt = select(AppConfig).limit(1)
+    config = session.exec(stmt).first()
+    
+    if not config:
+        config = AppConfig()
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+    
+    return config
 
 
 def _ceil_decimal_to_int(value: Decimal) -> int:
@@ -665,6 +729,7 @@ def _calc_development_estimation(
     velocity: Decimal,
     monthly_salary_total: Decimal,
     margin_percent: Decimal,
+    sprints_per_month: Decimal,
 ) -> dict:
     items_points_sum = _non_negative(items_points_sum)
     testing_percent = _non_negative(testing_percent)
@@ -685,7 +750,7 @@ def _calc_development_estimation(
         sprints_raw = Decimal("0")
         sprints_needed = 0
 
-    cost_per_sprint = monthly_salary_total / Decimal("2")
+    cost_per_sprint = monthly_salary_total / sprints_per_month
     total_cost = cost_per_sprint * Decimal(str(sprints_needed))
     margin_amount = (total_cost * margin_percent) / Decimal("100")
     final_cost = total_cost + margin_amount
@@ -1208,6 +1273,8 @@ def estimation_create(
         effort_participation_by_id=effort_participation_by_id,
     )
 
+    config = _get_app_config(session)
+    
     calc = _calc_development_estimation(
         items_points_sum=points_sum,
         testing_percent=t_pct,
@@ -1215,6 +1282,7 @@ def estimation_create(
         velocity=eff_vel,
         monthly_salary_total=salary_total,
         margin_percent=m_pct,
+        sprints_per_month=config.sprints_per_month,
     )
 
     estimation = DevelopmentEstimation(
@@ -1756,6 +1824,8 @@ def estimation_update(
         effort_participation_by_id=effort_participation_by_id,
     )
 
+    config = _get_app_config(session)
+    
     calc = _calc_development_estimation(
         items_points_sum=points_sum,
         testing_percent=t_pct,
@@ -1763,6 +1833,7 @@ def estimation_update(
         velocity=eff_vel,
         monthly_salary_total=salary_total,
         margin_percent=m_pct,
+        sprints_per_month=config.sprints_per_month,
     )
 
     estimation.title = title.strip()
@@ -1880,6 +1951,8 @@ def create_project(
     sprints = _parse_sprints_needed(sprints_needed)
     start = _to_date(start_date)
     is_included = included is not None
+    
+    config = _get_app_config(session)
 
     project = Project(
         client_id=client_id,
@@ -1896,7 +1969,11 @@ def create_project(
         sprints_needed=sprints,
         start_date=start,
         end_date=(
-            _calc_project_end_date(start_date=start, sprints_needed=sprints)
+            _calc_project_end_date(
+                start_date=start, 
+                sprints_needed=sprints,
+                sprint_days=config.sprint_days
+            )
             if is_included
             else None
         ),
@@ -1926,6 +2003,7 @@ def edit_project_page(
             DevelopmentEstimation, project.source_estimation_id
         )
 
+    config = _get_app_config(session)
     end_date_display = project.end_date
 
     approved_counts = True if project.approved is None else bool(project.approved)
@@ -1940,6 +2018,7 @@ def edit_project_page(
         end_date_display = _calc_project_end_date(
             start_date=project.start_date,
             sprints_needed=int(project.sprints_needed or 0),
+            sprint_days=config.sprint_days,
         )
 
     return templates.TemplateResponse(
@@ -1988,6 +2067,8 @@ def update_project(
 
     project.description = description.strip()
 
+    config = _get_app_config(session)
+    
     sprints = _parse_sprints_needed(sprints_needed)
     start = _to_date(start_date)
 
@@ -1995,7 +2076,9 @@ def update_project(
     project.start_date = start
     if bool(project.included):
         project.end_date = _calc_project_end_date(
-            start_date=start, sprints_needed=sprints
+            start_date=start, 
+            sprints_needed=sprints,
+            sprint_days=config.sprint_days
         )
     else:
         project.end_date = None
@@ -2080,6 +2163,8 @@ def roadmap_page(
     clients = session.exec(select(Client).order_by(Client.name)).all()
     client_by_id = {c.id: c for c in clients}
 
+    config = _get_app_config(session)
+    
     statement = select(Project)
     if year is not None:
         statement = statement.where(Project.year == year)
@@ -2100,7 +2185,9 @@ def roadmap_page(
         end = p.end_date
         if end is None and (p.sprints_needed or 0) > 0:
             end = _calc_project_end_date(
-                start_date=start, sprints_needed=int(p.sprints_needed or 0)
+                start_date=start, 
+                sprints_needed=int(p.sprints_needed or 0),
+                sprint_days=config.sprint_days
             )
 
         end_for_range = end or start
@@ -2189,6 +2276,8 @@ def set_project_included(
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
+    config = _get_app_config(session)
+    
     # No permitir excluir un proyecto aprobado desde la simulación.
     if project.approved is True:
         project.included = True
@@ -2199,6 +2288,7 @@ def set_project_included(
         project.end_date = _calc_project_end_date(
             start_date=project.start_date,
             sprints_needed=int(project.sprints_needed or 0),
+            sprint_days=config.sprint_days,
         )
     else:
         project.end_date = None
@@ -2225,12 +2315,15 @@ def approve_project(
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
+    config = _get_app_config(session)
+    
     project.approved = True
     project.included = True
 
     project.end_date = _calc_project_end_date(
         start_date=project.start_date,
         sprints_needed=int(project.sprints_needed or 0),
+        sprint_days=config.sprint_days,
     )
 
     session.add(project)

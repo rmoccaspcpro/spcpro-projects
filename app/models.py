@@ -153,3 +153,13 @@ class TeamMember(SQLModel, table=True):
     monthly_salary: Decimal = Field(default=Decimal("0"))
     active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AppConfig(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Sprint configuration
+    sprint_days: int = Field(default=14)
+    sprints_per_month: Decimal = Field(default=Decimal("2"))
+    
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

@@ -127,6 +127,23 @@ def _migrate_sqlite() -> None:
                 )
             )
 
+    # Migrate AppConfig table (create if not exists)
+    # SQLModel.metadata.create_all ya crea la tabla, solo nos aseguramos de que exista
+    # y que tenga un registro por defecto
+    config_cols = _sqlite_columns("appconfig")
+    if config_cols:
+        with engine.begin() as conn:
+            # Verificar si ya existe un registro de configuración
+            result = conn.execute(text("SELECT COUNT(*) FROM appconfig")).fetchone()
+            if result and result[0] == 0:
+                # Crear registro por defecto
+                conn.execute(
+                    text(
+                        "INSERT INTO appconfig (sprint_days, sprints_per_month, updated_at) "
+                        "VALUES (14, 2, datetime('now'))"
+                    )
+                )
+
 
 def get_session() -> Session:
     return Session(engine)

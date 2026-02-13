@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 m-0">Configuración</h1>
+    <div class="text-muted">Parámetros generales del sistema.</div>
+  </div>
+</div>
+
+{% if message %}
+<div class="alert alert-success">{{ message }}</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h6">Configuración de Sprints</h2>
+        <form method="post" action="/config">
+          {% include "_csrf.html" %}
+          <div class="mb-3">
+            <label class="form-label">Días por Sprint</label>
+            <input class="form-control" name="sprint_days" type="number" min="1" value="{{ config.sprint_days }}" required />
+            <small class="form-text text-muted">Número de días que dura cada sprint (usado para calcular fechas de fin de proyecto).</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Sprints por Mes</label>
+            <input class="form-control" name="sprints_per_month" type="text" inputmode="decimal" value="{{ config.sprints_per_month }}" required />
+            <small class="form-text text-muted">Cantidad de sprints por mes (usado para cálculo de costos en estimaciones).</small>
+          </div>
+          <button class="btn btn-primary" type="submit">Guardar</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="text-muted small mt-2">
+      Solo administradores.
+    </div>
+  </div>
+</div>
+{% endblock %}
