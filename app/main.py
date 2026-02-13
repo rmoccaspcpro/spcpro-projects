@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 from urllib.parse import parse_qs, quote_plus
@@ -602,6 +602,50 @@ def _to_decimal(value: Optional[str], default: Decimal = Decimal("0")) -> Decima
         return default
 
 
+def _to_date(value: Optional[str]) -> Optional[date]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _to_int(value: Optional[str], default: int = 0) -> int:
+    if value is None:
+        return default
+    s = str(value).strip()
+    if s == "":
+        return default
+    try:
+        return int(s)
+    except Exception:
+        return default
+
+
+def _parse_sprints_needed(value: Optional[str]) -> int:
+    """Parse sprints that may come as decimal and round up.
+
+    Example: "1.15" -> 2
+    """
+
+    dec = _non_negative(_to_decimal(value, default=Decimal("0")))
+    return _ceil_decimal_to_int(dec)
+
+
+def _calc_project_end_date(
+    *, start_date: Optional[date], sprints_needed: int
+) -> Optional[date]:
+    if not start_date:
+        return None
+    if sprints_needed <= 0:
+        return None
+    return start_date + timedelta(days=14 * int(sprints_needed))
+
+
 def _non_negative(value: Decimal) -> Decimal:
     return value if value >= 0 else Decimal("0")
 
@@ -658,6 +702,77 @@ def _calc_development_estimation(
         "margin_amount": margin_amount,
         "final_cost": final_cost,
     }
+
+
+def _parse_member_participation_fields(
+    raw_fields: list[str], *, default: Decimal = Decimal("100")
+) -> dict[int, Decimal]:
+    """Parse repeated fields formatted as '<id>:<pct>' into a dict.
+
+    Clamps pct to [0, 100].
+    """
+
+    participation_by_id: dict[int, Decimal] = {}
+    for raw in raw_fields:
+        try:
+            s = str(raw)
+            if ":" not in s:
+                continue
+            id_str, pct_str = s.split(":", 1)
+            member_id = int(id_str.strip())
+            pct = _to_decimal(pct_str.strip(), default=default)
+            if pct < 0:
+                pct = Decimal("0")
+            if pct > 100:
+                pct = Decimal("100")
+            participation_by_id[member_id] = pct
+        except Exception:
+            continue
+    return participation_by_id
+
+
+def _effective_velocity(
+    *,
+    base_velocity: Decimal,
+    selected_member_ids: list[int],
+    effort_participation_by_id: dict[int, Decimal],
+) -> Decimal:
+    """Compute effective velocity based on average effort participation.
+
+    Example: base 30 and all selected at 50% => effective 15.
+    If no team members are selected, returns base_velocity.
+
+    If a selected member has effort participation 0%, it is treated as "not present"
+    and does not affect the average.
+    """
+
+    base_velocity = _non_negative(base_velocity)
+    if base_velocity <= 0:
+        return Decimal("0")
+    if not selected_member_ids:
+        return base_velocity
+
+    total_pct = Decimal("0")
+    count_non_zero = 0
+    for member_id in selected_member_ids:
+        pct = effort_participation_by_id.get(int(member_id), Decimal("100"))
+        if pct < 0:
+            pct = Decimal("0")
+        if pct > 100:
+            pct = Decimal("100")
+        if pct == 0:
+            continue
+        count_non_zero += 1
+        total_pct += pct
+
+    # If all selected members have 0% effort, there is effectively no capacity.
+    if count_non_zero <= 0:
+        return Decimal("0")
+
+    avg_factor = total_pct / (Decimal(str(count_non_zero)) * Decimal("100"))
+    if avg_factor < 0:
+        avg_factor = Decimal("0")
+    return base_velocity * avg_factor
 
 
 def _project_counts_for_totals(project: Project) -> bool:
@@ -1015,6 +1130,7 @@ def estimation_create(
     notes: str = Form(""),
     team_member_id: list[str] = Form([]),
     team_member_participation: list[str] = Form([]),
+    team_member_effort_participation: list[str] = Form([]),
     feature_name: list[str] = Form([]),
     feature_points: list[str] = Form([]),
     testing_percent: str = Form(""),
@@ -1049,35 +1165,28 @@ def estimation_create(
             continue
     selected_ids = sorted(set(selected_ids))
 
-    # Parse participations sent as repeated fields: "<id>:<pct>".
-    participation_by_id: dict[int, Decimal] = {}
-    for raw in team_member_participation:
-        try:
-            s = str(raw)
-            if ":" not in s:
-                continue
-            id_str, pct_str = s.split(":", 1)
-            member_id = int(id_str.strip())
-            pct = _to_decimal(pct_str.strip(), default=Decimal("100"))
-            if pct < 0:
-                pct = Decimal("0")
-            if pct > 100:
-                pct = Decimal("100")
-            participation_by_id[member_id] = pct
-        except Exception:
-            continue
+    cost_participation_by_id = _parse_member_participation_fields(
+        team_member_participation, default=Decimal("100")
+    )
+    effort_participation_by_id = _parse_member_participation_fields(
+        team_member_effort_participation, default=Decimal("100")
+    )
 
     salary_total = _to_decimal(monthly_salary_total, default=Decimal("0"))
     participation_json: dict[str, str] = {}
+    effort_participation_json: dict[str, str] = {}
     if selected_ids:
         members = session.exec(
             select(TeamMember).where(TeamMember.id.in_(selected_ids))
         ).all()
         salary_total = Decimal("0")
         for m in members:
-            pct = participation_by_id.get(m.id or 0, Decimal("100"))
+            pct = cost_participation_by_id.get(m.id or 0, Decimal("100"))
             participation_json[str(m.id)] = str(pct)
             salary_total += (m.monthly_salary * pct) / Decimal("100")
+
+            effort_pct = effort_participation_by_id.get(m.id or 0, Decimal("100"))
+            effort_participation_json[str(m.id)] = str(effort_pct)
 
     items: list[dict] = []
     points_sum = Decimal("0")
@@ -1093,11 +1202,17 @@ def estimation_create(
         items.append({"name": name, "points": str(pts)})
         points_sum += pts
 
+    eff_vel = _effective_velocity(
+        base_velocity=vel,
+        selected_member_ids=selected_ids,
+        effort_participation_by_id=effort_participation_by_id,
+    )
+
     calc = _calc_development_estimation(
         items_points_sum=points_sum,
         testing_percent=t_pct,
         buffer_percent=b_pct,
-        velocity=vel,
+        velocity=eff_vel,
         monthly_salary_total=salary_total,
         margin_percent=m_pct,
     )
@@ -1110,6 +1225,9 @@ def estimation_create(
         team_member_ids_json=json.dumps(selected_ids, ensure_ascii=False),
         team_member_participation_json=json.dumps(
             participation_json, ensure_ascii=False
+        ),
+        team_member_effort_participation_json=json.dumps(
+            effort_participation_json, ensure_ascii=False
         ),
         points_sum=calc["points_sum"],
         testing_percent=t_pct,
@@ -1176,6 +1294,15 @@ def estimation_detail_page(
     except Exception:
         participation_raw = {}
 
+    try:
+        effort_participation_raw = json.loads(
+            estimation.team_member_effort_participation_json or "{}"
+        )
+        if not isinstance(effort_participation_raw, dict):
+            effort_participation_raw = {}
+    except Exception:
+        effort_participation_raw = {}
+
     selected_members: list[TeamMember] = []
     ids_int: list[int] = []
     for raw_id in member_ids:
@@ -1183,6 +1310,7 @@ def estimation_detail_page(
             ids_int.append(int(str(raw_id)))
         except Exception:
             continue
+    ids_int = sorted(set(ids_int))
     if ids_int:
         selected_members = session.exec(
             select(TeamMember)
@@ -1192,18 +1320,44 @@ def estimation_detail_page(
 
     selected_member_rows: list[dict] = []
     for m in selected_members:
-        pct_raw = participation_raw.get(str(m.id), "100")
-        pct = _to_decimal(str(pct_raw), default=Decimal("100"))
-        if pct < 0:
-            pct = Decimal("0")
-        if pct > 100:
-            pct = Decimal("100")
-        used = (m.monthly_salary * pct) / Decimal("100")
+        cost_pct_raw = participation_raw.get(str(m.id), "100")
+        cost_pct = _to_decimal(str(cost_pct_raw), default=Decimal("100"))
+        if cost_pct < 0:
+            cost_pct = Decimal("0")
+        if cost_pct > 100:
+            cost_pct = Decimal("100")
+
+        effort_pct_raw = effort_participation_raw.get(str(m.id), "100")
+        effort_pct = _to_decimal(str(effort_pct_raw), default=Decimal("100"))
+        if effort_pct < 0:
+            effort_pct = Decimal("0")
+        if effort_pct > 100:
+            effort_pct = Decimal("100")
+
+        used = (m.monthly_salary * cost_pct) / Decimal("100")
         try:
             used = used.quantize(Decimal("0.01"))
         except Exception:
             pass
-        selected_member_rows.append({"member": m, "pct": pct, "salary_used": used})
+
+        selected_member_rows.append(
+            {
+                "member": m,
+                "cost_pct": cost_pct,
+                "effort_pct": effort_pct,
+                "salary_used": used,
+            }
+        )
+
+    eff_vel = _effective_velocity(
+        base_velocity=estimation.velocity or Decimal("0"),
+        selected_member_ids=ids_int,
+        effort_participation_by_id={
+            int(k): _to_decimal(str(v), default=Decimal("100"))
+            for k, v in effort_participation_raw.items()
+            if str(k).strip().isdigit()
+        },
+    )
 
     linked_project = session.exec(
         select(Project)
@@ -1222,6 +1376,7 @@ def estimation_detail_page(
             "items": items,
             "selected_members": selected_members,
             "selected_member_rows": selected_member_rows,
+            "effective_velocity": eff_vel,
             "linked_project": linked_project,
             "message": message,
         },
@@ -1376,6 +1531,7 @@ def estimation_to_project_create(
         estimated_extra_cost=_non_negative(extra_cost),
         description=desc,
         source_estimation_id=estimation_id,
+        sprints_needed=int(estimation.sprints_needed or 0),
     )
     session.add(project)
     session.commit()
@@ -1450,11 +1606,22 @@ def estimation_edit_page(
     selected_ids = sorted(set(selected_ids))
 
     try:
-        participation_raw = json.loads(estimation.team_member_participation_json or "{}")
+        participation_raw = json.loads(
+            estimation.team_member_participation_json or "{}"
+        )
         if not isinstance(participation_raw, dict):
             participation_raw = {}
     except Exception:
         participation_raw = {}
+
+    try:
+        effort_participation_raw = json.loads(
+            estimation.team_member_effort_participation_json or "{}"
+        )
+        if not isinstance(effort_participation_raw, dict):
+            effort_participation_raw = {}
+    except Exception:
+        effort_participation_raw = {}
 
     linked_project = session.exec(
         select(Project)
@@ -1481,6 +1648,7 @@ def estimation_edit_page(
             "team_members": team_members,
             "selected_member_ids": selected_ids,
             "participation": participation_raw,
+            "effort_participation": effort_participation_raw,
             "linked_project": linked_project,
         },
     )
@@ -1494,6 +1662,7 @@ def estimation_update(
     notes: str = Form(""),
     team_member_id: list[str] = Form([]),
     team_member_participation: list[str] = Form([]),
+    team_member_effort_participation: list[str] = Form([]),
     feature_name: list[str] = Form([]),
     feature_points: list[str] = Form([]),
     testing_percent: str = Form(""),
@@ -1546,33 +1715,28 @@ def estimation_update(
             continue
     selected_ids = sorted(set(selected_ids))
 
-    # Parse participations sent as repeated fields: "<id>:<pct>".
-    participation_by_id: dict[int, Decimal] = {}
-    for raw in team_member_participation:
-        try:
-            s = str(raw)
-            if ":" not in s:
-                continue
-            id_str, pct_str = s.split(":", 1)
-            member_id = int(id_str.strip())
-            pct = _to_decimal(pct_str.strip(), default=Decimal("100"))
-            if pct < 0:
-                pct = Decimal("0")
-            if pct > 100:
-                pct = Decimal("100")
-            participation_by_id[member_id] = pct
-        except Exception:
-            continue
+    cost_participation_by_id = _parse_member_participation_fields(
+        team_member_participation, default=Decimal("100")
+    )
+    effort_participation_by_id = _parse_member_participation_fields(
+        team_member_effort_participation, default=Decimal("100")
+    )
 
     salary_total = _to_decimal(monthly_salary_total, default=Decimal("0"))
     participation_json: dict[str, str] = {}
+    effort_participation_json: dict[str, str] = {}
     if selected_ids:
-        members = session.exec(select(TeamMember).where(TeamMember.id.in_(selected_ids))).all()
+        members = session.exec(
+            select(TeamMember).where(TeamMember.id.in_(selected_ids))
+        ).all()
         salary_total = Decimal("0")
         for m in members:
-            pct = participation_by_id.get(m.id or 0, Decimal("100"))
+            pct = cost_participation_by_id.get(m.id or 0, Decimal("100"))
             participation_json[str(m.id)] = str(pct)
             salary_total += (m.monthly_salary * pct) / Decimal("100")
+
+            effort_pct = effort_participation_by_id.get(m.id or 0, Decimal("100"))
+            effort_participation_json[str(m.id)] = str(effort_pct)
 
     items: list[dict] = []
     points_sum = Decimal("0")
@@ -1586,11 +1750,17 @@ def estimation_update(
         items.append({"name": name, "points": str(pts)})
         points_sum += pts
 
+    eff_vel = _effective_velocity(
+        base_velocity=vel,
+        selected_member_ids=selected_ids,
+        effort_participation_by_id=effort_participation_by_id,
+    )
+
     calc = _calc_development_estimation(
         items_points_sum=points_sum,
         testing_percent=t_pct,
         buffer_percent=b_pct,
-        velocity=vel,
+        velocity=eff_vel,
         monthly_salary_total=salary_total,
         margin_percent=m_pct,
     )
@@ -1599,7 +1769,12 @@ def estimation_update(
     estimation.notes = notes.strip()
     estimation.items_json = json.dumps(items, ensure_ascii=False)
     estimation.team_member_ids_json = json.dumps(selected_ids, ensure_ascii=False)
-    estimation.team_member_participation_json = json.dumps(participation_json, ensure_ascii=False)
+    estimation.team_member_participation_json = json.dumps(
+        participation_json, ensure_ascii=False
+    )
+    estimation.team_member_effort_participation_json = json.dumps(
+        effort_participation_json, ensure_ascii=False
+    )
 
     estimation.points_sum = calc["points_sum"]
     estimation.testing_percent = t_pct
@@ -1692,6 +1867,8 @@ def create_project(
     estimated_support_cost: str = Form("0"),
     estimated_improvement_cost: str = Form("0"),
     estimated_extra_cost: str = Form("0"),
+    sprints_needed: str = Form(""),
+    start_date: str = Form(""),
     included: Optional[str] = Form(None),
     description: str = Form(""),
     session: Session = Depends(get_session),
@@ -1700,18 +1877,29 @@ def create_project(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
+    sprints = _parse_sprints_needed(sprints_needed)
+    start = _to_date(start_date)
+    is_included = included is not None
+
     project = Project(
         client_id=client_id,
         year=year,
         name=name.strip(),
         approved=False,
-        included=included is not None,
+        included=is_included,
         estimated_support_cost=_non_negative(_to_decimal(estimated_support_cost)),
         estimated_improvement_cost=_non_negative(
             _to_decimal(estimated_improvement_cost)
         ),
         estimated_extra_cost=_non_negative(_to_decimal(estimated_extra_cost)),
         description=description.strip(),
+        sprints_needed=sprints,
+        start_date=start,
+        end_date=(
+            _calc_project_end_date(start_date=start, sprints_needed=sprints)
+            if is_included
+            else None
+        ),
     )
     session.add(project)
     session.commit()
@@ -1732,10 +1920,38 @@ def edit_project_page(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
+    source_estimation: Optional[DevelopmentEstimation] = None
+    if project.source_estimation_id:
+        source_estimation = session.get(
+            DevelopmentEstimation, project.source_estimation_id
+        )
+
+    end_date_display = project.end_date
+
+    approved_counts = True if project.approved is None else bool(project.approved)
+    included_counts = False if project.included is None else bool(project.included)
+    counts_for_planning = approved_counts or included_counts
+    if (
+        end_date_display is None
+        and counts_for_planning
+        and project.start_date
+        and (project.sprints_needed or 0) > 0
+    ):
+        end_date_display = _calc_project_end_date(
+            start_date=project.start_date,
+            sprints_needed=int(project.sprints_needed or 0),
+        )
+
     return templates.TemplateResponse(
         request,
         "project_edit.html",
-        {"title": "Editar proyecto", "project": project, "client": client},
+        {
+            "title": "Editar proyecto",
+            "project": project,
+            "client": client,
+            "source_estimation": source_estimation,
+            "end_date_display": end_date_display,
+        },
     )
 
 
@@ -1749,6 +1965,8 @@ def update_project(
     estimated_support_cost: str = Form("0"),
     estimated_improvement_cost: str = Form("0"),
     estimated_extra_cost: str = Form("0"),
+    sprints_needed: str = Form(""),
+    start_date: str = Form(""),
     description: str = Form(""),
     session: Session = Depends(get_session),
 ):
@@ -1769,6 +1987,18 @@ def update_project(
     project.estimated_extra_cost = _non_negative(_to_decimal(estimated_extra_cost))
 
     project.description = description.strip()
+
+    sprints = _parse_sprints_needed(sprints_needed)
+    start = _to_date(start_date)
+
+    project.sprints_needed = sprints
+    project.start_date = start
+    if bool(project.included):
+        project.end_date = _calc_project_end_date(
+            start_date=start, sprints_needed=sprints
+        )
+    else:
+        project.end_date = None
 
     session.add(project)
     session.commit()
@@ -1836,6 +2066,118 @@ def report_page(
     )
 
 
+@app.get("/roadmap")
+def roadmap_page(
+    request: Request,
+    year: Optional[int] = None,
+    session: Session = Depends(get_session),
+):
+    """Roadmap cross-client based on project start/end dates.
+
+    Includes projects that are approved or explicitly included.
+    """
+
+    clients = session.exec(select(Client).order_by(Client.name)).all()
+    client_by_id = {c.id: c for c in clients}
+
+    statement = select(Project)
+    if year is not None:
+        statement = statement.where(Project.year == year)
+    projects = session.exec(statement).all()
+
+    considered = [p for p in projects if _project_counts_for_totals(p)]
+
+    entries: list[dict] = []
+    missing_start: list[dict] = []
+
+    for p in considered:
+        client = client_by_id.get(p.client_id)
+        start = p.start_date
+        if not start:
+            missing_start.append({"project": p, "client": client})
+            continue
+
+        end = p.end_date
+        if end is None and (p.sprints_needed or 0) > 0:
+            end = _calc_project_end_date(
+                start_date=start, sprints_needed=int(p.sprints_needed or 0)
+            )
+
+        end_for_range = end or start
+
+        entries.append(
+            {
+                "project": p,
+                "client": client,
+                "start": start,
+                "end": end,
+                "end_for_range": end_for_range,
+            }
+        )
+
+    entries.sort(
+        key=lambda r: (
+            r["start"],
+            (r["client"].name if r.get("client") else ""),
+            r["project"].name,
+        )
+    )
+
+    min_date: Optional[date] = None
+    max_date: Optional[date] = None
+    if entries:
+        min_date = min((r["start"] for r in entries))
+        max_date = max((r["end_for_range"] for r in entries))
+
+    timeline_total_days = 1
+    if min_date and max_date:
+        try:
+            timeline_total_days = max(1, int((max_date - min_date).days))
+        except Exception:
+            timeline_total_days = 1
+
+    today = date.today()
+    today_pct: Optional[float] = None
+    if min_date and max_date and min_date <= today <= max_date:
+        today_pct = ((today - min_date).days / timeline_total_days) * 100.0
+
+    for r in entries:
+        start = r["start"]
+        end_for_range = r["end_for_range"]
+        offset_days = max(0, int((start - min_date).days)) if min_date else 0
+        duration_days = max(0, int((end_for_range - start).days))
+
+        left_pct = (offset_days / timeline_total_days) * 100.0
+        width_pct = (duration_days / timeline_total_days) * 100.0
+        # Ensure visibility even for 0-day durations.
+        if width_pct < 0.8:
+            width_pct = 0.8
+
+        r["left_pct"] = left_pct
+        r["width_pct"] = width_pct
+
+    missing_start.sort(
+        key=lambda r: (
+            (r["client"].name if r.get("client") else ""),
+            r["project"].name,
+        )
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "roadmap.html",
+        {
+            "title": "Roadmap",
+            "year": year,
+            "entries": entries,
+            "missing_start": missing_start,
+            "timeline_start": min_date,
+            "timeline_end": max_date,
+            "today_pct": today_pct,
+        },
+    )
+
+
 @app.post("/projects/{project_id}/include")
 def set_project_included(
     project_id: int,
@@ -1852,6 +2194,14 @@ def set_project_included(
         project.included = True
     else:
         project.included = bool(int(included))
+
+    if project.included:
+        project.end_date = _calc_project_end_date(
+            start_date=project.start_date,
+            sprints_needed=int(project.sprints_needed or 0),
+        )
+    else:
+        project.end_date = None
 
     session.add(project)
     session.commit()
@@ -1877,6 +2227,11 @@ def approve_project(
 
     project.approved = True
     project.included = True
+
+    project.end_date = _calc_project_end_date(
+        start_date=project.start_date,
+        sprints_needed=int(project.sprints_needed or 0),
+    )
 
     session.add(project)
     session.commit()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
@@ -65,6 +65,11 @@ class Project(SQLModel, table=True):
     estimated_improvement_cost: Decimal = Field(default=Decimal("0"))
     estimated_extra_cost: Decimal = Field(default=Decimal("0"))
 
+    # Planning fields (used when project is included/approved)
+    sprints_needed: int = Field(default=0)
+    start_date: Optional[date] = Field(default=None)
+    end_date: Optional[date] = Field(default=None)
+
     description: str = Field(default="")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -112,6 +117,10 @@ class DevelopmentEstimation(SQLModel, table=True):
 
     # Stored as JSON string: {"1": "50", "2": "50"}
     team_member_participation_json: str = Field(default="{}")
+
+    # Stored as JSON string: {"1": "100", "2": "50"}
+    # Participation that affects effort/velocity (capacity for points).
+    team_member_effort_participation_json: str = Field(default="{}")
 
     points_sum: Decimal = Field(default=Decimal("0"))
 

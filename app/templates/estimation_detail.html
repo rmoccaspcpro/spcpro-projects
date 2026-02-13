@@ -76,7 +76,7 @@
             {% for r in selected_member_rows %}
               <div>
                 {{ r.member.name }}
-                <span class="text-muted">({{ r.member.monthly_salary|money }} · {{ r.pct|dec2 }}% → {{ r.salary_used|money }})</span>
+                <span class="text-muted">({{ r.member.monthly_salary|money }} · $ {{ r.cost_pct|dec2 }}% → {{ r.salary_used|money }} · Pts {{ r.effort_pct|dec2 }}%)</span>
               </div>
             {% endfor %}
           {% else %}
@@ -94,7 +94,8 @@
           <div class="mt-1"><strong>Buffer (%):</strong> {{ estimation.buffer_percent|dec2 }}</div>
           <div><strong>Buffer (pts):</strong> {{ estimation.buffer_points|dec2 }}</div>
           <div class="mt-2"><strong>Total puntos:</strong> {{ estimation.total_points|dec2 }}</div>
-          <div class="mt-2"><strong>Velocidad:</strong> {{ estimation.velocity|dec2 }}</div>
+          <div class="mt-2"><strong>Velocidad (ingresada):</strong> {{ estimation.velocity|dec2 }}</div>
+          <div><strong>Velocidad (efectiva):</strong> {{ effective_velocity|dec2 }}</div>
           <div><strong>Sprints (raw):</strong> {{ estimation.sprints_raw|dec2 }}</div>
           <div><strong>Sprints necesarios (ceil):</strong> {{ estimation.sprints_needed }}</div>
           <hr />

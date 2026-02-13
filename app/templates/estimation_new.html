@@ -91,18 +91,24 @@
                       </label>
                     </div>
 
-                    <div class="input-group input-group-sm" style="max-width: 160px;">
-                      <span class="input-group-text">%</span>
+                    <div class="input-group input-group-sm" style="max-width: 170px;">
+                      <span class="input-group-text" title="Participación para costo">$ %</span>
                       <input class="form-control text-end team-member-pct" type="text" inputmode="decimal" id="tm_pct_{{ m.id }}" data-member-id="{{ m.id }}" value="100" disabled />
                     </div>
 
+                    <div class="input-group input-group-sm" style="max-width: 170px;">
+                      <span class="input-group-text" title="Participación para puntos/velocidad">Pts %</span>
+                      <input class="form-control text-end team-member-effort-pct" type="text" inputmode="decimal" id="tm_eff_pct_{{ m.id }}" data-member-id="{{ m.id }}" value="100" disabled />
+                    </div>
+
                     <input type="hidden" name="team_member_participation" id="tmp_{{ m.id }}" value="{{ m.id }}:100" disabled />
+                    <input type="hidden" name="team_member_effort_participation" id="tme_{{ m.id }}" value="{{ m.id }}:100" disabled />
                   </div>
                 {% else %}
                   <div class="text-muted small">No hay miembros activos. Podés cargarlos en <a href="/team">Equipo</a>.</div>
                 {% endfor %}
               </div>
-              <div class="form-text">Se calcula como sueldo * (participación %). Si no seleccionás nadie, podés cargar el total manual.</div>
+              <div class="form-text">$% impacta en costo (sueldo * participación). Pts% impacta en la velocidad efectiva para calcular sprints.</div>
             </div>
 
             <div class="col-6">
@@ -129,6 +135,7 @@
             <div><strong>Testing (pts):</strong> <span id="out_testing_points">0</span></div>
             <div><strong>Buffer (pts):</strong> <span id="out_buffer_points">0</span></div>
             <div class="mt-1"><strong>Total puntos:</strong> <span id="out_total_points">0</span></div>
+            <div class="mt-2"><strong>Velocidad (efectiva):</strong> <span id="out_velocity_effective">0</span></div>
             <div class="mt-2"><strong>Sprints (raw):</strong> <span id="out_sprints_raw">0</span></div>
             <div><strong>Sprints necesarios (ceil):</strong> <span id="out_sprints_needed">0</span></div>
             <div class="mt-2"><strong>Costo por sprint:</strong> <span id="out_cost_per_sprint">0</span></div>
@@ -199,18 +206,32 @@
     const teamChecks = Array.from(document.querySelectorAll('.team-member'));
     let selectedSalaryTotal = 0;
     let selectedCount = 0;
+    let effortPctSum = 0;
+    let effortCount = 0;
     for (const el of teamChecks) {
       const memberId = el.value;
-      const pctInput = document.getElementById(`tm_pct_${memberId}`);
-      const hidden = document.getElementById(`tmp_${memberId}`);
-      if (pctInput) pctInput.disabled = !el.checked;
-      if (hidden) hidden.disabled = !el.checked;
+      const costPctInput = document.getElementById(`tm_pct_${memberId}`);
+      const costHidden = document.getElementById(`tmp_${memberId}`);
+      const effortPctInput = document.getElementById(`tm_eff_pct_${memberId}`);
+      const effortHidden = document.getElementById(`tme_${memberId}`);
+
+      if (costPctInput) costPctInput.disabled = !el.checked;
+      if (costHidden) costHidden.disabled = !el.checked;
+      if (effortPctInput) effortPctInput.disabled = !el.checked;
+      if (effortHidden) effortHidden.disabled = !el.checked;
 
       if (el.checked) {
         selectedCount += 1;
-        const pct = Math.min(100, Math.max(0, parseNumber(pctInput ? pctInput.value : '100')));
-        if (hidden) hidden.value = `${memberId}:${pct}`;
-        selectedSalaryTotal += Math.max(0, parseNumber(el.dataset.salary)) * (pct / 100);
+        const costPct = Math.min(100, Math.max(0, parseNumber(costPctInput ? costPctInput.value : '100')));
+        if (costHidden) costHidden.value = `${memberId}:${costPct}`;
+        selectedSalaryTotal += Math.max(0, parseNumber(el.dataset.salary)) * (costPct / 100);
+
+        const effPct = Math.min(100, Math.max(0, parseNumber(effortPctInput ? effortPctInput.value : '100')));
+        if (effortHidden) effortHidden.value = `${memberId}:${effPct}`;
+        if (effPct > 0) {
+          effortPctSum += effPct;
+          effortCount += 1;
+        }
       }
     }
 
@@ -227,8 +248,15 @@
     const bufferPts = subtotalPts * (bufferPct / 100);
     const totalPts = subtotalPts + bufferPts;
 
-    const sprintsRaw = velocity > 0 ? (totalPts / velocity) : 0;
-    const sprintsNeeded = velocity > 0 ? ceilToInt(sprintsRaw) : 0;
+    let velocityEffective = velocity;
+    if (velocity > 0 && selectedCount > 0) {
+      velocityEffective = effortCount > 0
+        ? (velocity * (effortPctSum / (100 * effortCount)))
+        : 0;
+    }
+
+    const sprintsRaw = velocityEffective > 0 ? (totalPts / velocityEffective) : 0;
+    const sprintsNeeded = velocityEffective > 0 ? ceilToInt(sprintsRaw) : 0;
 
     const costPerSprint = salaryTotal / 2;
     const totalCost = costPerSprint * sprintsNeeded;
@@ -241,6 +269,7 @@
     document.getElementById('out_testing_points').textContent = fmt(testingPts);
     document.getElementById('out_buffer_points').textContent = fmt(bufferPts);
     document.getElementById('out_total_points').textContent = fmt(totalPts);
+    document.getElementById('out_velocity_effective').textContent = fmt(velocityEffective);
     document.getElementById('out_sprints_raw').textContent = fmt(sprintsRaw);
     document.getElementById('out_sprints_needed').textContent = String(sprintsNeeded);
     document.getElementById('out_cost_per_sprint').textContent = fmt(costPerSprint);

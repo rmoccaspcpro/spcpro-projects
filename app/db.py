@@ -44,6 +44,9 @@ def _migrate_sqlite() -> None:
             "estimated_support_cost": "NUMERIC",
             "estimated_improvement_cost": "NUMERIC",
             "estimated_extra_cost": "NUMERIC",
+            "sprints_needed": "INTEGER DEFAULT 0",
+            "start_date": "TEXT",
+            "end_date": "TEXT",
             # Para proyectos estimados: si approved=0 se excluye del cómputo.
             # Default 0 (borrador). Para DBs existentes se hace backfill a 1.
             "approved": "INTEGER DEFAULT 0",
@@ -69,6 +72,13 @@ def _migrate_sqlite() -> None:
                 conn.execute(
                     text(
                         "UPDATE project SET included = COALESCE(approved, 1) WHERE included IS NULL"
+                    )
+                )
+
+            if "sprints_needed" in _sqlite_columns("project"):
+                conn.execute(
+                    text(
+                        "UPDATE project SET sprints_needed = 0 WHERE sprints_needed IS NULL"
                     )
                 )
 
@@ -104,6 +114,16 @@ def _migrate_sqlite() -> None:
             conn.execute(
                 text(
                     "ALTER TABLE developmentestimation ADD COLUMN team_member_participation_json TEXT"
+                )
+            )
+
+    # Migrate DevelopmentEstimation table (effort participation for velocity)
+    est_cols = _sqlite_columns("developmentestimation")
+    if est_cols and "team_member_effort_participation_json" not in est_cols:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE developmentestimation ADD COLUMN team_member_effort_participation_json TEXT"
                 )
             )
 
