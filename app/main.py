@@ -592,7 +592,7 @@ def config_update(
 ):
     _require_admin(request)
     config = _get_app_config(session)
-    
+
     try:
         days = int(sprint_days.strip())
         if days <= 0:
@@ -600,20 +600,20 @@ def config_update(
         config.sprint_days = days
     except (ValueError, AttributeError):
         config.sprint_days = 14
-    
+
     config.sprints_per_month = _non_negative(
         _to_decimal(sprints_per_month, default=Decimal("2"))
     )
     if config.sprints_per_month <= 0:
         config.sprints_per_month = Decimal("2")
-    
+
     config.updated_at = datetime.utcnow()
     session.add(config)
     session.commit()
-    
+
     return RedirectResponse(
         url="/config?message=" + quote_plus("Configuración actualizada."),
-        status_code=303
+        status_code=303,
     )
 
 
@@ -704,13 +704,13 @@ def _get_app_config(session: Session) -> AppConfig:
     """Get or create app configuration."""
     stmt = select(AppConfig).limit(1)
     config = session.exec(stmt).first()
-    
+
     if not config:
         config = AppConfig()
         session.add(config)
         session.commit()
         session.refresh(config)
-    
+
     return config
 
 
@@ -804,11 +804,11 @@ def _effective_velocity(
 ) -> Decimal:
     """Compute effective velocity based on average effort participation.
 
-    Example: base 30 and all selected at 50% => effective 15.
+    Example: base 30 and 3 selected at [0%, 0%, 100%] => effective 10.
     If no team members are selected, returns base_velocity.
 
-    If a selected member has effort participation 0%, it is treated as "not present"
-    and does not affect the average.
+    Note: a selected member with 0% effort *does* affect the average (it contributes
+    0 capacity). If you want them excluded, unselect the member.
     """
 
     base_velocity = _non_negative(base_velocity)
@@ -818,23 +818,20 @@ def _effective_velocity(
         return base_velocity
 
     total_pct = Decimal("0")
-    count_non_zero = 0
     for member_id in selected_member_ids:
         pct = effort_participation_by_id.get(int(member_id), Decimal("100"))
         if pct < 0:
             pct = Decimal("0")
         if pct > 100:
             pct = Decimal("100")
-        if pct == 0:
-            continue
-        count_non_zero += 1
         total_pct += pct
 
     # If all selected members have 0% effort, there is effectively no capacity.
-    if count_non_zero <= 0:
+    if total_pct <= 0:
         return Decimal("0")
 
-    avg_factor = total_pct / (Decimal(str(count_non_zero)) * Decimal("100"))
+    selected_count = len(selected_member_ids)
+    avg_factor = total_pct / (Decimal(str(selected_count)) * Decimal("100"))
     if avg_factor < 0:
         avg_factor = Decimal("0")
     return base_velocity * avg_factor
@@ -1274,7 +1271,7 @@ def estimation_create(
     )
 
     config = _get_app_config(session)
-    
+
     calc = _calc_development_estimation(
         items_points_sum=points_sum,
         testing_percent=t_pct,
@@ -1825,7 +1822,7 @@ def estimation_update(
     )
 
     config = _get_app_config(session)
-    
+
     calc = _calc_development_estimation(
         items_points_sum=points_sum,
         testing_percent=t_pct,
@@ -1951,7 +1948,7 @@ def create_project(
     sprints = _parse_sprints_needed(sprints_needed)
     start = _to_date(start_date)
     is_included = included is not None
-    
+
     config = _get_app_config(session)
 
     project = Project(
@@ -1970,9 +1967,7 @@ def create_project(
         start_date=start,
         end_date=(
             _calc_project_end_date(
-                start_date=start, 
-                sprints_needed=sprints,
-                sprint_days=config.sprint_days
+                start_date=start, sprints_needed=sprints, sprint_days=config.sprint_days
             )
             if is_included
             else None
@@ -2068,7 +2063,7 @@ def update_project(
     project.description = description.strip()
 
     config = _get_app_config(session)
-    
+
     sprints = _parse_sprints_needed(sprints_needed)
     start = _to_date(start_date)
 
@@ -2076,9 +2071,7 @@ def update_project(
     project.start_date = start
     if bool(project.included):
         project.end_date = _calc_project_end_date(
-            start_date=start, 
-            sprints_needed=sprints,
-            sprint_days=config.sprint_days
+            start_date=start, sprints_needed=sprints, sprint_days=config.sprint_days
         )
     else:
         project.end_date = None
@@ -2164,7 +2157,7 @@ def roadmap_page(
     client_by_id = {c.id: c for c in clients}
 
     config = _get_app_config(session)
-    
+
     statement = select(Project)
     if year is not None:
         statement = statement.where(Project.year == year)
@@ -2185,9 +2178,9 @@ def roadmap_page(
         end = p.end_date
         if end is None and (p.sprints_needed or 0) > 0:
             end = _calc_project_end_date(
-                start_date=start, 
+                start_date=start,
                 sprints_needed=int(p.sprints_needed or 0),
-                sprint_days=config.sprint_days
+                sprint_days=config.sprint_days,
             )
 
         end_for_range = end or start
@@ -2277,7 +2270,7 @@ def set_project_included(
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     config = _get_app_config(session)
-    
+
     # No permitir excluir un proyecto aprobado desde la simulación.
     if project.approved is True:
         project.included = True
@@ -2316,7 +2309,7 @@ def approve_project(
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     config = _get_app_config(session)
-    
+
     project.approved = True
     project.included = True
 

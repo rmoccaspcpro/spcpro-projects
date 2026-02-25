@@ -227,7 +227,6 @@
     let selectedSalaryTotal = 0;
     let selectedCount = 0;
     let effortPctSum = 0;
-    let effortCount = 0;
     for (const el of teamChecks) {
       const memberId = el.value;
       const costPctInput = document.getElementById(`tm_pct_${memberId}`);
@@ -248,10 +247,7 @@
 
         const effPct = Math.min(100, Math.max(0, parseNumber(effortPctInput ? effortPctInput.value : '100')));
         if (effortHidden) effortHidden.value = `${memberId}:${effPct}`;
-        if (effPct > 0) {
-          effortPctSum += effPct;
-          effortCount += 1;
-        }
+        effortPctSum += effPct;
       }
     }
 
@@ -270,9 +266,7 @@
 
     let velocityEffective = velocity;
     if (velocity > 0 && selectedCount > 0) {
-      velocityEffective = effortCount > 0
-        ? (velocity * (effortPctSum / (100 * effortCount)))
-        : 0;
+      velocityEffective = velocity * (effortPctSum / (100 * selectedCount));
     }
 
     const sprintsRaw = velocityEffective > 0 ? (totalPts / velocityEffective) : 0;
